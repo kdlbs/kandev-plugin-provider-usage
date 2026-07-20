@@ -1,0 +1,70 @@
+id: "kandev-provider-usage"
+api_version: 1
+version: "0.1.0"
+display_name: "Provider Usage"
+description: "Subscription utilization for your agent providers — how much of each rate-limit window (5-hour / weekly / monthly) is used, with reset times. A Settings page lists every provider; a chat-bar icon shows the current session's provider. Data comes from the codexbar CLI."
+author: "kandev"
+categories: ["analytics"]
+
+runtime:
+  type: binary
+  executables:
+    linux-amd64: "server/plugin-linux-amd64"
+    linux-arm64: "server/plugin-linux-arm64"
+    darwin-amd64: "server/plugin-darwin-amd64"
+    darwin-arm64: "server/plugin-darwin-arm64"
+    windows-amd64: "server/plugin-windows-amd64.exe"
+
+# Read-only access to kandev sessions so the backend can map the composer's
+# kandev session id to the agent it runs, and from there to a codexbar provider
+# (claude / codex / gemini / ...). The UI only ever sends kandev ids; the
+# session -> provider resolution happens server-side.
+capabilities:
+  api_read: ["sessions"]
+
+webhooks:
+  - key: "status"
+    description: "codexbar CLI install status: resolved command, source, version (GET; ?refresh=1 re-probes)"
+    method: "GET"
+  - key: "providers"
+    description: "Subscription utilization for every configured provider as JSON (GET; ?refresh=1 bypasses the cache)"
+    method: "GET"
+  - key: "session"
+    description: "Subscription utilization for the current session's provider (GET; ?task_id=&active=&refresh=1)"
+    method: "GET"
+
+ui:
+  bundle: "/ui/bundle.js"
+
+# Operator settings (Settings > Plugins > Provider Usage). Read through the Host
+# GetConfig RPC on every webhook call; kandev restarts the plugin whenever the
+# operator saves, so changes take effect immediately.
+config_schema:
+  type: object
+  properties:
+    command:
+      type: string
+      title: "codexbar command"
+      description: >-
+        Command to run the codexbar CLI, e.g. "/usr/local/bin/codexbar". Leave
+        empty to auto-detect: "codexbar" on PATH if installed, otherwise a
+        pinned per-platform binary is downloaded once (verified by SHA-256) and
+        cached under ~/.config/kandev-provider-usage. codexbar ships macOS and
+        Linux binaries only; on Windows, set this to a codexbar path.
+    providers:
+      type: string
+      title: "Providers to list"
+      description: >-
+        Comma-separated codexbar provider ids to show on the Settings page,
+        e.g. "claude,codex,gemini". Leave empty to query all providers codexbar
+        knows about (slower; unconfigured providers are listed as unavailable).
+    warn_threshold:
+      type: number
+      title: "Warn threshold (%)"
+      description: "A window at or above this utilization turns amber. Default 75."
+      default: 75
+    high_threshold:
+      type: number
+      title: "High threshold (%)"
+      description: "A window at or above this utilization turns red. Default 90."
+      default: 90
