@@ -5,16 +5,17 @@ rate-limit window (5-hour / weekly / monthly …) is used, with reset times.
 Data comes from the [codexbar](https://github.com/steipete/codexbar) CLI, so it
 covers ~60 providers (Claude, Codex/OpenAI, Gemini, Copilot, Cursor, Grok, …).
 
-Two surfaces:
+**One surface:** a gauge in the **session top bar** (the `chat-top-bar` plugin
+slot, kandev ≥ #1827). Hover it to open a panel that cycles through **every**
+provider — prev/next arrows and dot anchors — starting with the provider that
+backs the **current session**. Each provider shows its rate-limit windows as
+bars (green / amber / red by your thresholds), reset countdowns, plan/source
+badges, and Augment's raw monthly consumption. The gauge also shows the current
+provider's busiest-window % inline.
 
-- **Settings → Provider Usage** — a page listing utilization for every provider
-  codexbar can read on this machine, plus the ones it can't (with why).
-- **Chat-bar icon** — a gauge in the composer showing utilization for the
-  provider backing the **current session's** agent; hover for the full
-  per-window breakdown. The inline number is the busiest window's percentage,
-  colored green / amber / red by your thresholds.
-
-Everything is computed backend-side; the UI is a dumb renderer.
+Everything is computed backend-side (one `overview` webhook returns the warm
+snapshot of all providers plus the resolved current-session provider); the UI is
+a dumb renderer.
 
 ## Augment (Analytics API)
 

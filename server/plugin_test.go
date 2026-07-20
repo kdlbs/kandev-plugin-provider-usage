@@ -482,6 +482,27 @@ func TestHandleWebhook_NoAugmentWithoutConfig(t *testing.T) {
 	}
 }
 
+func TestHandleWebhook_Overview(t *testing.T) {
+	sessions := []pluginsdk.Session{session("kandev-sess", "Claude Code")}
+	p := newTestPlugin(t, codexbarConfig(nil), sessions, perProviderRunner(nil))
+
+	resp, err := p.HandleWebhook(context.Background(),
+		webhookGet(webhookKeyOverview, "task_id=task-1&active=kandev-sess"))
+	require.NoError(t, err)
+	require.Equal(t, int32(200), resp.Status)
+
+	var report OverviewReport
+	require.NoError(t, json.Unmarshal(resp.Body, &report))
+	require.Equal(t, "claude", report.CurrentProvider, "resolves the session's provider")
+	require.NotNil(t, report.AllProvidersReport)
+	// The snapshot fields are flattened alongside current_provider.
+	var flat map[string]any
+	require.NoError(t, json.Unmarshal(resp.Body, &flat))
+	require.Contains(t, flat, "providers")
+	require.Contains(t, flat, "current_provider")
+	require.NotEmpty(t, report.Providers)
+}
+
 func TestPollOnceDedupsWithinMaxAge(t *testing.T) {
 	var calls int32
 	cfg := codexbarConfig(map[string]any{"providers": "claude"})

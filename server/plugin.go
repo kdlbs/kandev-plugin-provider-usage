@@ -17,6 +17,7 @@ const (
 	webhookKeyStatus    = "status"
 	webhookKeyProviders = "providers"
 	webhookKeySession   = "session"
+	webhookKeyOverview  = "overview"
 
 	// probeTimeout bounds a `--version` check; perProviderTimeout bounds a single
 	// provider's usage run; reportTimeout bounds the whole providers report (all
@@ -186,6 +187,8 @@ func (p *plugin) HandleWebhook(ctx context.Context, req *pluginsdk.WebhookReques
 		return jsonResponse(200, p.providersJSON(ctx, refresh)), nil
 	case webhookKeySession:
 		return jsonResponse(200, p.sessionJSON(ctx, query.Get("task_id"), query.Get("active"), refresh)), nil
+	case webhookKeyOverview:
+		return jsonResponse(200, p.overviewJSON(ctx, query.Get("task_id"), query.Get("active"), refresh)), nil
 	default:
 		return jsonResponse(404, []byte(`{"error":"unknown webhook"}`)), nil
 	}
@@ -256,6 +259,23 @@ type AllProvidersReport struct {
 
 func (p *plugin) providersJSON(ctx context.Context, refresh bool) []byte {
 	return marshalOr(p.snapshotForRead(ctx, refresh), `{"error":"encoding providers report"}`)
+}
+
+// OverviewReport is the chat-top-bar payload: the whole snapshot plus the
+// provider that backs the active session, so the UI can list every provider and
+// open on the current one.
+type OverviewReport struct {
+	*AllProvidersReport
+	CurrentProvider string `json:"current_provider"`
+}
+
+func (p *plugin) overviewJSON(ctx context.Context, taskID, activeSessionID string, refresh bool) []byte {
+	snap := p.snapshotForRead(ctx, refresh)
+	report := OverviewReport{
+		AllProvidersReport: snap,
+		CurrentProvider:    p.resolveProvider(ctx, taskID, activeSessionID),
+	}
+	return marshalOr(report, `{"error":"encoding overview report"}`)
 }
 
 // collectProviders probes codexbar, then queries each provider and partitions

@@ -2,7 +2,7 @@ id: "kandev-provider-usage"
 api_version: 1
 version: "0.1.0"
 display_name: "Provider Usage"
-description: "Subscription utilization for your agent providers — how much of each rate-limit window (5-hour / weekly / monthly) is used, with reset times. A Settings page lists every provider; a chat-bar icon shows the current session's provider. Data comes from the codexbar CLI."
+description: "Subscription utilization for your agent providers — how much of each rate-limit window (5-hour / weekly / monthly) is used, with reset times. Hover the gauge in the session top bar to cycle through every provider, starting with the current session's. Data comes from the codexbar CLI (plus Augment's Analytics API)."
 author: "kandev"
 categories: ["analytics"]
 
@@ -31,6 +31,9 @@ webhooks:
     method: "GET"
   - key: "session"
     description: "Subscription utilization for the current session's provider (GET; ?task_id=&active=&refresh=1)"
+    method: "GET"
+  - key: "overview"
+    description: "All providers plus the current session's provider, for the chat-top-bar panel (GET; ?task_id=&active=&refresh=1)"
     method: "GET"
 
 ui:
