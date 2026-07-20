@@ -309,14 +309,16 @@ func (p *plugin) appendAugment(ctx context.Context, report *AllProvidersReport) 
 	if token == "" || email == "" {
 		return
 	}
+	resource := augmentResource(cfg[configKeyAugmentResource])
 	client := &augmentClient{
-		base:     augmentAPIBase,
-		token:    token,
-		email:    email,
-		resource: augmentResource(cfg[configKeyAugmentResource]),
-		budget:   positiveFloatOr(cfg[configKeyAugmentBudget], 0),
-		post:     p.httpPost,
-		now:      p.now,
+		base:          augmentAPIBase,
+		token:         token,
+		email:         email,
+		resource:      resource,
+		budget:        positiveFloatOr(cfg[configKeyAugmentBudget], 0),
+		defaultBudget: augmentDefaultBudget(resource),
+		post:          p.httpPost,
+		now:           p.now,
 	}
 	cctx, cancel := context.WithTimeout(ctx, perProviderTimeout)
 	defer cancel()
@@ -327,6 +329,16 @@ func (p *plugin) appendAugment(ctx context.Context, report *AllProvidersReport) 
 		return
 	}
 	report.Providers = append(report.Providers, *usage)
+}
+
+// augmentDefaultBudget is the assumed monthly cap when none is configured. Only
+// credits get one (2.5M); a USD default would be meaningless, so it stays 0
+// (raw amount, no bar) until the operator sets augment_monthly_budget.
+func augmentDefaultBudget(resource string) float64 {
+	if resource == augmentResourceUSD {
+		return 0
+	}
+	return defaultAugmentCreditsBudget
 }
 
 // augmentResource normalizes the configured resource to "credits" (default) or

@@ -86,11 +86,11 @@ config_schema:
       default: "credits"
     augment_monthly_budget:
       type: number
-      title: "Augment monthly budget"
+      title: "Augment monthly budget (max)"
       description: >-
-        Optional monthly budget (credits or USD) to show a used-of-budget
-        percentage. Leave empty to auto-detect a budget override, or to show raw
-        consumption with no percentage.
+        Monthly budget used to show a used-of-budget percentage bar. Precedence:
+        this value, then a per-user budget override from the Analytics API, then
+        a 2,500,000-credit default for credit plans. Set explicitly for USD plans.
     warn_threshold:
       type: number
       title: "Warn threshold (%)"

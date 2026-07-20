@@ -41,7 +41,7 @@ func newAugmentClient(resource string, budget float64, poster jsonPoster) *augme
 	}
 }
 
-func TestAugment_CreditsNoBudget(t *testing.T) {
+func TestAugment_NoBudgetNoDefault(t *testing.T) {
 	c := newAugmentClient(augmentResourceCredits, 0, fakePoster(nil, map[string]postResp{
 		"/cost-analytics":            {200, augCostSample},
 		"/get-user-budget-overrides": {200, `{"overrides":[]}`},
@@ -51,7 +51,20 @@ func TestAugment_CreditsNoBudget(t *testing.T) {
 	require.Equal(t, "augment", u.Provider)
 	require.Equal(t, "analytics", u.Source)
 	require.Equal(t, "959,232 credits this month", u.Detail)
-	require.Empty(t, u.Windows, "no budget -> no percentage window")
+	require.Empty(t, u.Windows, "no budget and no default -> no percentage window")
+}
+
+func TestAugment_DefaultBudgetWindow(t *testing.T) {
+	c := newAugmentClient(augmentResourceCredits, 0, fakePoster(nil, map[string]postResp{
+		"/cost-analytics":            {200, augCostSample},
+		"/get-user-budget-overrides": {200, `{"overrides":[]}`},
+	}))
+	c.defaultBudget = defaultAugmentCreditsBudget
+	u, err := c.fetchUsage(context.Background())
+	require.NoError(t, err)
+	require.Len(t, u.Windows, 1, "default budget renders a bar")
+	require.InDelta(t, 959232.0/2_500_000*100, u.Windows[0].UtilizationPct, 1e-9)
+	require.Equal(t, "2,500,000 credits budget", u.Plan)
 }
 
 func TestAugment_CreditsManualBudget(t *testing.T) {

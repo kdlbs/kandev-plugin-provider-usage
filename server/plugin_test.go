@@ -430,6 +430,13 @@ func TestHandleWebhook_ProvidersIncludesAugment(t *testing.T) {
 	}
 	require.NotNil(t, aug, "augment appears alongside codexbar providers")
 	require.Equal(t, "959,232 credits this month", aug.Detail)
+	require.Len(t, aug.Windows, 1, "credits plan gets the 2.5M default budget bar")
+	require.InDelta(t, 959232.0/2_500_000*100, aug.Windows[0].UtilizationPct, 1e-9)
+}
+
+func TestAugmentDefaultBudget(t *testing.T) {
+	require.Equal(t, defaultAugmentCreditsBudget, augmentDefaultBudget(augmentResourceCredits))
+	require.Zero(t, augmentDefaultBudget(augmentResourceUSD))
 }
 
 func TestHandleWebhook_AugmentErrorIsUnavailable(t *testing.T) {

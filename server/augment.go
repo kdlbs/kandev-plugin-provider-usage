@@ -28,6 +28,10 @@ const (
 
 	apiResourceCredits = "BUDGET_RESOURCE_CREDITS_CONSUMED"
 	apiResourceUSD     = "BUDGET_RESOURCE_USD_COST"
+
+	// defaultAugmentCreditsBudget is the assumed monthly credit cap when nothing
+	// else is configured, so a credits plan always renders a used-of-budget bar.
+	defaultAugmentCreditsBudget = 2_500_000.0
 )
 
 // jsonPoster POSTs a JSON body with a bearer token and returns status + body.
@@ -36,13 +40,14 @@ type jsonPoster func(ctx context.Context, url, token string, body []byte) (int, 
 
 // augmentClient fetches one user's Augment usage.
 type augmentClient struct {
-	base     string
-	token    string
-	email    string
-	resource string  // "credits" | "usd"
-	budget   float64 // manual monthly budget; <= 0 means look one up
-	post     jsonPoster
-	now      func() time.Time
+	base          string
+	token         string
+	email         string
+	resource      string  // "credits" | "usd"
+	budget        float64 // explicit monthly budget from config; <= 0 means resolve one
+	defaultBudget float64 // fallback budget when none is configured/overridden (0 = none)
+	post          jsonPoster
+	now           func() time.Time
 }
 
 func (c *augmentClient) isCredits() bool { return c.resource != augmentResourceUSD }
@@ -87,15 +92,28 @@ func (c *augmentClient) fetchUsage(ctx context.Context) (*ProviderUsage, error) 
 		}
 	}
 
-	budget := c.budget
-	if budget <= 0 {
-		if b, err := c.fetchBudget(ctx); err != nil {
-			return nil, err
-		} else {
-			budget = b
-		}
+	budget, err := c.resolveBudget(ctx)
+	if err != nil {
+		return nil, err
 	}
 	return c.toProviderUsage(usage, budget), nil
+}
+
+// resolveBudget picks the monthly budget: an explicit config value wins, then a
+// per-user budget override from the API, then the configured default (e.g. the
+// 2.5M-credit fallback) so a bar/percentage still renders.
+func (c *augmentClient) resolveBudget(ctx context.Context) (float64, error) {
+	if c.budget > 0 {
+		return c.budget, nil
+	}
+	override, err := c.fetchBudget(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if override > 0 {
+		return override, nil
+	}
+	return c.defaultBudget, nil
 }
 
 func (c *augmentClient) fetchConsumption(ctx context.Context, start, end string) (float64, error) {
