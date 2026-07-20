@@ -32,18 +32,17 @@ const (
 	// and kandev restarts the plugin whenever the operator saves settings.
 	cacheTTL = 5 * time.Minute
 
-	configKeyCommand       = "command"
-	configKeyProviders     = "providers"
-	configKeyWarnThreshold = "warn_threshold"
-	configKeyHighThreshold = "high_threshold"
-	configKeyPollMinutes   = "poll_interval_minutes"
+	configKeyCommand       = "codexbar_command"
+	configKeyProviders     = "codexbar_providers"
+	configKeyPollMinutes   = "codexbar_poll_minutes"
+	configKeyWarnThreshold = "display_threshold_warn"
+	configKeyHighThreshold = "display_threshold_high"
+	configKeyPillProviders = "display_pill_providers"
 
 	configKeyAugmentToken    = "augment_api_token"
 	configKeyAugmentEmail    = "augment_email"
 	configKeyAugmentResource = "augment_resource"
 	configKeyAugmentBudget   = "augment_monthly_budget"
-
-	configKeyPillProviders = "pill_providers"
 
 	// pillCurrent / pillAll are tokens in pill_providers standing for the current
 	// session's provider and every available provider.

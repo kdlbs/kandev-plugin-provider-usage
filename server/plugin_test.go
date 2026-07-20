@@ -66,7 +66,7 @@ func noLookPath(string) (string, error) { return "", errors.New("not found") }
 
 // newTestPlugin wires a plugin with a scripted runner, no PATH lookup, and a
 // downloader that never hits the network (so an unconfigured resolve fails
-// cleanly instead of downloading). Pass config {"command":"codexbar"} to select
+// cleanly instead of downloading). Pass config {"codexbar_command":"codexbar"} to select
 // the settings source.
 func newTestPlugin(t *testing.T, config map[string]any, sessions []pluginsdk.Session, run runner) *plugin {
 	t.Helper()
@@ -135,7 +135,7 @@ func argValue(args []string, flag string) string {
 }
 
 func codexbarConfig(extra map[string]any) map[string]any {
-	cfg := map[string]any{"command": "codexbar"}
+	cfg := map[string]any{"codexbar_command": "codexbar"}
 	for k, v := range extra {
 		cfg[k] = v
 	}
@@ -209,7 +209,7 @@ func perProviderRunner(calls *int32) runner {
 
 func TestHandleWebhook_ProvidersPartitions(t *testing.T) {
 	var calls int32
-	cfg := codexbarConfig(map[string]any{"providers": "claude, codex, cursor"})
+	cfg := codexbarConfig(map[string]any{"codexbar_providers": "claude, codex, cursor"})
 	p := newTestPlugin(t, cfg, nil, perProviderRunner(&calls))
 
 	resp, err := p.HandleWebhook(context.Background(), webhookGet(webhookKeyProviders, ""))
@@ -248,7 +248,7 @@ func TestHandleWebhook_ProvidersDefaultSet(t *testing.T) {
 
 func TestHandleWebhook_ProvidersAllSweep(t *testing.T) {
 	var calls int32
-	cfg := codexbarConfig(map[string]any{"providers": "all"})
+	cfg := codexbarConfig(map[string]any{"codexbar_providers": "all"})
 	p := newTestPlugin(t, cfg, nil, usageRunner(&calls, sampleAll(), nil))
 
 	resp, err := p.HandleWebhook(context.Background(), webhookGet(webhookKeyProviders, ""))
@@ -280,7 +280,7 @@ func TestHandleWebhook_ProvidersDegradesWhenMissing(t *testing.T) {
 
 func TestHandleWebhook_ProvidersCached(t *testing.T) {
 	var calls int32
-	cfg := codexbarConfig(map[string]any{"providers": "claude"})
+	cfg := codexbarConfig(map[string]any{"codexbar_providers": "claude"})
 	p := newTestPlugin(t, cfg, nil, perProviderRunner(&calls))
 	ctx := context.Background()
 
@@ -351,7 +351,7 @@ func TestHandleWebhook_SessionProviderError(t *testing.T) {
 func TestHandleWebhook_SessionOnDemandForUnpolledProvider(t *testing.T) {
 	// Operator narrowed the polled set to codex, but the session runs claude —
 	// the snapshot doesn't cover it, so the session fetches claude on demand.
-	cfg := codexbarConfig(map[string]any{"providers": "codex"})
+	cfg := codexbarConfig(map[string]any{"codexbar_providers": "codex"})
 	sessions := []pluginsdk.Session{session("kandev-sess", "Claude Code")}
 	p := newTestPlugin(t, cfg, sessions, perProviderRunner(nil))
 
@@ -367,7 +367,7 @@ func TestHandleWebhook_SessionOnDemandForUnpolledProvider(t *testing.T) {
 }
 
 func TestHandleWebhook_SessionThresholdsFromConfig(t *testing.T) {
-	cfg := codexbarConfig(map[string]any{"warn_threshold": 60.0, "high_threshold": 85.0})
+	cfg := codexbarConfig(map[string]any{"display_threshold_warn": 60.0, "display_threshold_high": 85.0})
 	sessions := []pluginsdk.Session{session("kandev-sess", "Claude Code")}
 	p := newTestPlugin(t, cfg, sessions, perProviderRunner(nil))
 
@@ -406,9 +406,9 @@ func TestSessionAndProvidersShareSnapshot(t *testing.T) {
 
 func TestHandleWebhook_ProvidersIncludesAugment(t *testing.T) {
 	cfg := codexbarConfig(map[string]any{
-		"providers":         "codex", // keep the codexbar set tiny
-		"augment_api_token": "tok",
-		"augment_email":     "a@b.com",
+		"codexbar_providers": "codex", // keep the codexbar set tiny
+		"augment_api_token":  "tok",
+		"augment_email":      "a@b.com",
 	})
 	p := newTestPlugin(t, cfg, nil, perProviderRunner(nil))
 	p.now = midMonth
@@ -441,9 +441,9 @@ func TestAugmentDefaultBudget(t *testing.T) {
 
 func TestHandleWebhook_AugmentErrorIsUnavailable(t *testing.T) {
 	cfg := codexbarConfig(map[string]any{
-		"providers":         "codex",
-		"augment_api_token": "tok",
-		"augment_email":     "a@b.com",
+		"codexbar_providers": "codex",
+		"augment_api_token":  "tok",
+		"augment_email":      "a@b.com",
 	})
 	p := newTestPlugin(t, cfg, nil, perProviderRunner(nil))
 	p.now = midMonth
@@ -468,7 +468,7 @@ func TestHandleWebhook_AugmentErrorIsUnavailable(t *testing.T) {
 
 func TestHandleWebhook_NoAugmentWithoutConfig(t *testing.T) {
 	// Without a token/email, the Augment API is never called (poster would error).
-	p := newTestPlugin(t, codexbarConfig(map[string]any{"providers": "codex"}), nil, perProviderRunner(nil))
+	p := newTestPlugin(t, codexbarConfig(map[string]any{"codexbar_providers": "codex"}), nil, perProviderRunner(nil))
 	resp, err := p.HandleWebhook(context.Background(), webhookGet(webhookKeyProviders, ""))
 	require.NoError(t, err)
 
@@ -518,7 +518,7 @@ func TestOverviewPillProviders(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			cfg := codexbarConfig(map[string]any{"providers": "claude,codex", "pill_providers": c.pill})
+			cfg := codexbarConfig(map[string]any{"codexbar_providers": "claude,codex", "display_pill_providers": c.pill})
 			p := newTestPlugin(t, cfg, sessions, perProviderRunner(nil))
 			resp, err := p.HandleWebhook(context.Background(),
 				webhookGet(webhookKeyOverview, "task_id=task-1&active=kandev-sess"))
@@ -532,7 +532,7 @@ func TestOverviewPillProviders(t *testing.T) {
 
 func TestPollOnceDedupsWithinMaxAge(t *testing.T) {
 	var calls int32
-	cfg := codexbarConfig(map[string]any{"providers": "claude"})
+	cfg := codexbarConfig(map[string]any{"codexbar_providers": "claude"})
 	p := newTestPlugin(t, cfg, nil, perProviderRunner(&calls))
 	ctx := context.Background()
 

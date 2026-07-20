@@ -44,71 +44,70 @@ ui:
 # operator saves, so changes take effect immediately.
 config_schema:
   type: object
+  # Fields render grouped by their key prefix: augment_ · codexbar_ · display_.
   properties:
-    command:
-      type: string
-      title: "codexbar command"
-      description: >-
-        Command to run the codexbar CLI, e.g. "/usr/local/bin/codexbar". Leave
-        empty to auto-detect: "codexbar" on PATH if installed, otherwise a
-        pinned per-platform binary is downloaded once (verified by SHA-256) and
-        cached under ~/.config/kandev-provider-usage. codexbar ships macOS and
-        Linux binaries only; on Windows, set this to a codexbar path.
-    providers:
-      type: string
-      title: "Providers to list"
-      description: >-
-        Comma-separated codexbar provider ids to poll, e.g. "claude,codex,gemini".
-        Leave empty for a curated default set of local-credential providers. Use
-        "all" to sweep every provider codexbar knows about (much slower).
-    pill_providers:
-      type: string
-      title: "Top-bar pill providers"
-      description: >-
-        Which providers to show in the session top-bar pill (each as an icon +
-        %), comma-separated, e.g. "current,claude,codex". Tokens: "current" = the
-        current session's provider, "all" = every provider, or an explicit id.
-        Empty = just the current session's provider.
-    poll_interval_minutes:
-      type: number
-      title: "Refresh interval (minutes)"
-      description: >-
-        How often the plugin refreshes provider usage in the background. Both the
-        Settings page and the chat-bar icon serve the latest snapshot instantly;
-        the Refresh button forces an immediate update. Default 5, minimum 1.
-      default: 5
+    # ── Augment (optional) ────────────────────────────────────────────────
     augment_api_token:
       type: string
-      title: "Augment Analytics API token"
+      format: password
+      secret: true
+      title: "Augment · API token"
       description: >-
-        Augment Analytics service-account token. When set (with the email
-        below), an "Augment" card shows your monthly consumption via Augment's
-        Analytics API (api.augmentcode.com) — codexbar can't read Augment off
-        macOS. Stored in the plugin config.
+        Augment Analytics service-account token. With the email below, adds an
+        Augment card + pill entry showing monthly consumption via Augment's
+        Analytics API. Stored as a secret.
     augment_email:
       type: string
-      title: "Augment account email"
+      title: "Augment · Account email"
       description: "Your Augment org email, used to filter Analytics to your usage."
-    augment_resource:
-      type: string
-      title: "Augment plan unit"
-      description: "Whether your Augment plan is billed in credits or USD."
-      enum: ["credits", "usd"]
-      default: "credits"
     augment_monthly_budget:
       type: number
-      title: "Augment monthly budget (max)"
+      title: "Augment · Monthly budget (max)"
       description: >-
-        Monthly budget used to show a used-of-budget percentage bar. Precedence:
-        this value, then a per-user budget override from the Analytics API, then
-        a 2,500,000-credit default for credit plans. Set explicitly for USD plans.
-    warn_threshold:
+        Budget for the used-of-budget %. Precedence: this value → a per-user
+        Analytics budget override → a 2,500,000-credit default (credit plans).
+    augment_resource:
+      type: string
+      enum: ["credits", "usd"]
+      default: "credits"
+      title: "Augment · Plan unit"
+      description: "Whether your Augment plan is billed in credits or USD."
+
+    # ── codexbar (data source) ────────────────────────────────────────────
+    codexbar_command:
+      type: string
+      title: "codexbar · CLI command"
+      description: >-
+        Path to the codexbar CLI. Empty = auto-detect (PATH, else a pinned
+        per-platform binary is downloaded once, SHA-256 verified). Windows has no
+        codexbar build — set a path there.
+    codexbar_poll_minutes:
       type: number
-      title: "Warn threshold (%)"
-      description: "A window at or above this utilization turns amber. Default 75."
+      default: 5
+      title: "codexbar · Refresh interval (min)"
+      description: "How often usage refreshes in the background. Default 5, minimum 1."
+    codexbar_providers:
+      type: string
+      title: "codexbar · Providers to poll"
+      description: >-
+        Comma-separated provider ids to poll, e.g. "claude,codex,gemini". Empty =
+        a curated local-credential set; "all" = every provider (much slower).
+
+    # ── Display ───────────────────────────────────────────────────────────
+    display_pill_providers:
+      type: string
+      title: "Display · Top-bar pill"
+      description: >-
+        Providers shown in the top-bar pill (icon + %), comma-separated. Tokens:
+        "current" (this session's provider), "all", or explicit ids. Empty =
+        current only.
+    display_threshold_warn:
+      type: number
       default: 75
-    high_threshold:
+      title: "Display · Warn threshold (%)"
+      description: "A window at or above this turns amber. Default 75."
+    display_threshold_high:
       type: number
-      title: "High threshold (%)"
-      description: "A window at or above this utilization turns red. Default 90."
       default: 90
+      title: "Display · High threshold (%)"
+      description: "A window at or above this turns red. Default 90."
