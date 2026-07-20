@@ -324,7 +324,7 @@ function makeProvidersPage(host) {
 
     return h(
       "div",
-      { style: { display: "flex", flexDirection: "column", gap: "16px", padding: "4px 2px 24px" } },
+      { style: { display: "flex", flexDirection: "column", gap: "16px", padding: "12px 24px 28px", maxWidth: "1200px" } },
       h(
         "div",
         { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" } },
