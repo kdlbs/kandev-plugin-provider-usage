@@ -66,6 +66,31 @@ config_schema:
         Settings page and the chat-bar icon serve the latest snapshot instantly;
         the Refresh button forces an immediate update. Default 5, minimum 1.
       default: 5
+    augment_api_token:
+      type: string
+      title: "Augment Analytics API token"
+      description: >-
+        Augment Analytics service-account token. When set (with the email
+        below), an "Augment" card shows your monthly consumption via Augment's
+        Analytics API (api.augmentcode.com) — codexbar can't read Augment off
+        macOS. Stored in the plugin config.
+    augment_email:
+      type: string
+      title: "Augment account email"
+      description: "Your Augment org email, used to filter Analytics to your usage."
+    augment_resource:
+      type: string
+      title: "Augment plan unit"
+      description: "Whether your Augment plan is billed in credits or USD."
+      enum: ["credits", "usd"]
+      default: "credits"
+    augment_monthly_budget:
+      type: number
+      title: "Augment monthly budget"
+      description: >-
+        Optional monthly budget (credits or USD) to show a used-of-budget
+        percentage. Leave empty to auto-detect a budget override, or to show raw
+        consumption with no percentage.
     warn_threshold:
       type: number
       title: "Warn threshold (%)"

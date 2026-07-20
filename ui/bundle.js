@@ -209,11 +209,20 @@ function providerCard(host, p, warn, high) {
     h(
       ui.CardContent,
       { style: { display: "flex", flexDirection: "column", gap: "14px" } },
+      p.detail
+        ? h(
+            "div",
+            { style: { fontSize: "18px", fontWeight: 700, color: COLOR.accent, fontVariantNumeric: "tabular-nums" } },
+            p.detail,
+          )
+        : null,
       windows.length
         ? windows.map(function (w, i) {
             return h("div", { key: i }, usageBar(h, w, warn, high));
           })
-        : h("div", { style: { fontSize: "12px", opacity: 0.6 } }, "No rate-limit windows reported."),
+        : p.detail
+          ? null
+          : h("div", { style: { fontSize: "12px", opacity: 0.6 } }, "No rate-limit windows reported."),
       paceLines.length
         ? h(
             "div",
@@ -391,11 +400,12 @@ function sessionPopover(host, state) {
   }
   if (!d.provider) return stateShell(h, "No known usage provider for this session's agent.");
   if (d.error) return stateShell(h, providerLabel(d.provider) + ": " + d.error);
-  if (!d.usage || !(d.usage.windows || []).length) {
-    return stateShell(h, "No rate-limit windows reported for " + providerLabel(d.provider) + " yet.");
+  var u = d.usage;
+  var windows = (u && u.windows) || [];
+  if (!u || (!windows.length && !u.detail)) {
+    return stateShell(h, "No usage reported for " + providerLabel(d.provider) + " yet.");
   }
 
-  var u = d.usage;
   var rows = [
     h(
       "div",
@@ -407,20 +417,33 @@ function sessionPopover(host, state) {
   if (u.plan) {
     rows.push(h("div", { style: { fontSize: "10.5px", opacity: 0.6, marginTop: "-2px" } }, "Plan: " + u.plan));
   }
-  rows.push(
-    h(
-      "div",
-      { style: { display: "flex", flexDirection: "column", gap: "10px", marginTop: "2px" } },
-      u.windows.map(function (w, i) {
-        return h("div", { key: i }, usageBar(h, w, d.warn_threshold, d.high_threshold));
-      }),
-    ),
-  );
+  if (u.detail) {
+    rows.push(
+      h(
+        "div",
+        { style: { fontSize: "16px", fontWeight: 700, color: COLOR.accent, fontVariantNumeric: "tabular-nums", marginTop: "2px" } },
+        u.detail,
+      ),
+    );
+  }
+  if (windows.length) {
+    rows.push(
+      h(
+        "div",
+        { style: { display: "flex", flexDirection: "column", gap: "10px", marginTop: "2px" } },
+        windows.map(function (w, i) {
+          return h("div", { key: i }, usageBar(h, w, d.warn_threshold, d.high_threshold));
+        }),
+      ),
+    );
+  }
   return h("div", { style: { display: "flex", flexDirection: "column", gap: "6px", minWidth: "210px" } }, rows);
 }
 
 function inlinePeak(h, d) {
-  if (!d || !d.usage || d.codexbar && d.codexbar.installed === false) return null;
+  if (!d || !d.usage || (d.codexbar && d.codexbar.installed === false)) return null;
+  // No rate-limit windows (e.g. Augment consumption with no budget) -> icon only.
+  if (!(d.usage.windows || []).length) return null;
   var pct = peakPct(d.usage);
   return h(
     "span",

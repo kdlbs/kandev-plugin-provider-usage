@@ -30,13 +30,17 @@ type Pace struct {
 // the native ProviderUsage: adds Source (where codexbar read the data) and the
 // optional Pace summaries.
 type ProviderUsage struct {
-	Provider  string              `json:"provider"`       // "claude", "codex", ...
-	Plan      string              `json:"plan,omitempty"` // e.g. "max", "pro", "free"
-	Windows   []UtilizationWindow `json:"windows"`
-	FetchedAt time.Time           `json:"fetched_at"`
-	Source    string              `json:"source,omitempty"` // codexbar source: oauth/web/cli/...
-	PacePrime *Pace               `json:"pace_primary,omitempty"`
-	PaceSec   *Pace               `json:"pace_secondary,omitempty"`
+	Provider string              `json:"provider"`       // "claude", "codex", ...
+	Plan     string              `json:"plan,omitempty"` // e.g. "max", "pro", "free"
+	Windows  []UtilizationWindow `json:"windows"`
+	// Detail is a human headline for providers whose usage isn't a rate-limit
+	// window percentage — e.g. Augment's raw monthly consumption ("959,232
+	// credits this month"). Empty for codexbar providers.
+	Detail    string    `json:"detail,omitempty"`
+	FetchedAt time.Time `json:"fetched_at"`
+	Source    string    `json:"source,omitempty"` // codexbar source: oauth/web/cli/...
+	PacePrime *Pace     `json:"pace_primary,omitempty"`
+	PaceSec   *Pace     `json:"pace_secondary,omitempty"`
 }
 
 // --- codexbar JSON wire types (subset of `codexbar usage --format json`) ------

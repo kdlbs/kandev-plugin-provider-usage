@@ -16,6 +16,16 @@ Two surfaces:
 
 Everything is computed backend-side; the UI is a dumb renderer.
 
+## Augment (Analytics API)
+
+codexbar can't read Augment off macOS, so Augment is fetched directly from its
+**Analytics API** (`api.augmentcode.com`) when you configure an
+`augment_api_token` (an Analytics service-account token) and your
+`augment_email`. It shows your **month-to-date consumption** (credits or USD),
+as a used-of-budget **percentage** when a budget is known — set
+`augment_monthly_budget`, or the plugin auto-detects a per-user budget override.
+With no budget it just shows the raw amount ("959,232 credits this month").
+
 ## How it stays fast
 
 A background poller refreshes a single snapshot of every provider's utilization
@@ -49,6 +59,10 @@ Utilization is read from your **local** provider credentials/logs (e.g.
 | `poll_interval_minutes` | Background refresh interval (default 5, minimum 1).                                              |
 | `warn_threshold`        | A window at/above this % turns amber (default 75).                                               |
 | `high_threshold`        | A window at/above this % turns red (default 90).                                                 |
+| `augment_api_token`     | Augment Analytics service-account token (enables the Augment card).                             |
+| `augment_email`         | Your Augment org email, used to filter Analytics to your usage.                                 |
+| `augment_resource`      | `credits` (default) or `usd` — which metric your Augment plan bills.                            |
+| `augment_monthly_budget`| Optional monthly budget for a used-of-budget %. Empty = auto-detect / raw amount.               |
 
 The pages have a **Refresh** button for an immediate update, and saving settings
 restarts the plugin (so changes take effect immediately).

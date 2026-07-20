@@ -81,6 +81,10 @@ func newTestPlugin(t *testing.T, config map[string]any, sessions []pluginsdk.Ses
 			return nil, errors.New("no network in tests")
 		},
 	}
+	// Default: Augment API is never reached in tests unless a test opts in.
+	p.httpPost = func(context.Context, string, string, []byte) (int, []byte, error) {
+		return 0, nil, errors.New("no augment network in tests")
+	}
 	p.SetHost(&fakeHost{config: config, sessions: sessions})
 	return p
 }
@@ -398,6 +402,77 @@ func TestSessionAndProvidersShareSnapshot(t *testing.T) {
 	_, err = p.HandleWebhook(ctx, webhookGet(webhookKeySession, q+"&refresh=1"))
 	require.NoError(t, err)
 	require.Greater(t, atomic.LoadInt32(&calls), first, "refresh=1 rebuilds the snapshot")
+}
+
+func TestHandleWebhook_ProvidersIncludesAugment(t *testing.T) {
+	cfg := codexbarConfig(map[string]any{
+		"providers":         "codex", // keep the codexbar set tiny
+		"augment_api_token": "tok",
+		"augment_email":     "a@b.com",
+	})
+	p := newTestPlugin(t, cfg, nil, perProviderRunner(nil))
+	p.now = midMonth
+	p.httpPost = fakePoster(nil, map[string]postResp{
+		"/cost-analytics":            {200, augCostSample},
+		"/get-user-budget-overrides": {200, `{"overrides":[]}`},
+	})
+
+	resp, err := p.HandleWebhook(context.Background(), webhookGet(webhookKeyProviders, ""))
+	require.NoError(t, err)
+
+	var report AllProvidersReport
+	require.NoError(t, json.Unmarshal(resp.Body, &report))
+	var aug *ProviderUsage
+	for i := range report.Providers {
+		if report.Providers[i].Provider == "augment" {
+			aug = &report.Providers[i]
+		}
+	}
+	require.NotNil(t, aug, "augment appears alongside codexbar providers")
+	require.Equal(t, "959,232 credits this month", aug.Detail)
+}
+
+func TestHandleWebhook_AugmentErrorIsUnavailable(t *testing.T) {
+	cfg := codexbarConfig(map[string]any{
+		"providers":         "codex",
+		"augment_api_token": "tok",
+		"augment_email":     "a@b.com",
+	})
+	p := newTestPlugin(t, cfg, nil, perProviderRunner(nil))
+	p.now = midMonth
+	p.httpPost = fakePoster(nil, map[string]postResp{
+		"/cost-analytics": {400, `{"error":{"message":"user_email(s) not found"}}`},
+	})
+
+	resp, err := p.HandleWebhook(context.Background(), webhookGet(webhookKeyProviders, ""))
+	require.NoError(t, err)
+
+	var report AllProvidersReport
+	require.NoError(t, json.Unmarshal(resp.Body, &report))
+	var found bool
+	for _, e := range report.Unavailable {
+		if e.Provider == "augment" {
+			found = true
+			require.Contains(t, e.Message, "not found")
+		}
+	}
+	require.True(t, found, "an augment fetch error lists it as unavailable")
+}
+
+func TestHandleWebhook_NoAugmentWithoutConfig(t *testing.T) {
+	// Without a token/email, the Augment API is never called (poster would error).
+	p := newTestPlugin(t, codexbarConfig(map[string]any{"providers": "codex"}), nil, perProviderRunner(nil))
+	resp, err := p.HandleWebhook(context.Background(), webhookGet(webhookKeyProviders, ""))
+	require.NoError(t, err)
+
+	var report AllProvidersReport
+	require.NoError(t, json.Unmarshal(resp.Body, &report))
+	for _, pr := range report.Providers {
+		require.NotEqual(t, "augment", pr.Provider)
+	}
+	for _, e := range report.Unavailable {
+		require.NotEqual(t, "augment", e.Provider)
+	}
 }
 
 func TestPollOnceDedupsWithinMaxAge(t *testing.T) {

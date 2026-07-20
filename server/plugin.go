@@ -37,6 +37,11 @@ const (
 	configKeyHighThreshold = "high_threshold"
 	configKeyPollMinutes   = "poll_interval_minutes"
 
+	configKeyAugmentToken    = "augment_api_token"
+	configKeyAugmentEmail    = "augment_email"
+	configKeyAugmentResource = "augment_resource"
+	configKeyAugmentBudget   = "augment_monthly_budget"
+
 	defaultWarnThreshold = 75.0 // % — a window turns amber at or above this
 	defaultHighThreshold = 90.0 // % — a window turns red at or above this
 
@@ -75,6 +80,7 @@ type plugin struct {
 	lookPath func(string) (string, error)
 	now      func() time.Time
 	dl       *downloader
+	httpPost jsonPoster // Augment Analytics API calls
 
 	// disablePoller keeps the background goroutine from starting in tests, so
 	// the snapshot is built synchronously by the webhook path instead.
@@ -101,6 +107,7 @@ func newPlugin() *plugin {
 		lookPath: exec.LookPath,
 		now:      time.Now,
 		dl:       newDownloader(),
+		httpPost: realJSONPost,
 	}
 }
 
@@ -288,7 +295,52 @@ func (p *plugin) collectProviders(ctx context.Context) *AllProvidersReport {
 			report.Providers = append(report.Providers, *u)
 		}
 	}
+	p.appendAugment(ctx, report)
 	return report
+}
+
+// appendAugment adds Augment usage to the report when an Augment Analytics token
+// + email are configured. Augment is fetched over its own API (codexbar can't
+// read it on non-macOS hosts), so it lives outside the codexbar provider set.
+func (p *plugin) appendAugment(ctx context.Context, report *AllProvidersReport) {
+	cfg := p.config(ctx)
+	token := trimmedString(cfg[configKeyAugmentToken])
+	email := trimmedString(cfg[configKeyAugmentEmail])
+	if token == "" || email == "" {
+		return
+	}
+	client := &augmentClient{
+		base:     augmentAPIBase,
+		token:    token,
+		email:    email,
+		resource: augmentResource(cfg[configKeyAugmentResource]),
+		budget:   positiveFloatOr(cfg[configKeyAugmentBudget], 0),
+		post:     p.httpPost,
+		now:      p.now,
+	}
+	cctx, cancel := context.WithTimeout(ctx, perProviderTimeout)
+	defer cancel()
+	usage, err := client.fetchUsage(cctx)
+	if err != nil {
+		log.Printf("augment usage fetch failed: %v", err)
+		report.Unavailable = append(report.Unavailable, ProviderError{Provider: "augment", Message: err.Error()})
+		return
+	}
+	report.Providers = append(report.Providers, *usage)
+}
+
+// augmentResource normalizes the configured resource to "credits" (default) or
+// "usd" — any value mentioning USD selects the dollar metric.
+func augmentResource(v any) string {
+	if s, ok := v.(string); ok && strings.Contains(strings.ToLower(s), "usd") {
+		return augmentResourceUSD
+	}
+	return augmentResourceCredits
+}
+
+func trimmedString(v any) string {
+	s, _ := v.(string)
+	return strings.TrimSpace(s)
 }
 
 // providerList resolves which providers the Settings page queries: the operator
@@ -302,7 +354,19 @@ func (p *plugin) providerList(ctx context.Context) []string {
 	if len(configured) == 0 {
 		return defaultProviders
 	}
-	return configured
+	// Augment is fetched via its own Analytics API (appendAugment), not codexbar.
+	return withoutAugment(configured)
+}
+
+// withoutAugment drops augment/auggie from a codexbar provider list.
+func withoutAugment(providers []string) []string {
+	out := providers[:0:0]
+	for _, p := range providers {
+		if p != "augment" && p != "auggie" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // queryProviders fetches usage for each provider CONCURRENTLY (each in its own

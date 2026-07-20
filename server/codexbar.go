@@ -167,6 +167,7 @@ var providerMatches = []providerMatch{
 	{"cursor", []string{"cursor"}},
 	{"grok", []string{"grok", "xai"}},
 	{"opencode", []string{"opencode"}},
+	{"augment", []string{"augment", "auggie"}},
 	{"amp", []string{"amp"}},
 }
 
