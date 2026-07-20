@@ -5,6 +5,7 @@ display_name: "Provider Usage"
 description: "Subscription utilization for your agent providers — how much of each rate-limit window (5-hour / weekly / monthly) is used, with reset times. Hover the gauge in the session top bar to cycle through every provider, starting with the current session's. Data comes from the codexbar CLI (plus Augment's Analytics API)."
 author: "kandev"
 categories: ["analytics"]
+repo_url: "https://github.com/kdlbs/kandev-provider-usage"
 
 runtime:
   type: binary
