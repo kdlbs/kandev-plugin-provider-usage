@@ -16,6 +16,9 @@ type UtilizationWindow struct {
 	// ResetDescription is codexbar's human-friendly reset string, kept verbatim
 	// because it already carries the provider's own timezone/wording.
 	ResetDescription string `json:"reset_description,omitempty"`
+	// Scoped marks a narrow/extra window (e.g. codexbar's "Fable only") so the UI
+	// can exclude it from the at-a-glance peak while still listing it.
+	Scoped bool `json:"scoped,omitempty"`
 }
 
 // Pace carries codexbar's optional burn-rate summary for a window ("52% in
@@ -154,7 +157,9 @@ func (u *cbUsage) windows() []UtilizationWindow {
 		if label == "" {
 			label = windowLabelFromMinutes(ex.Window.WindowMinutes)
 		}
-		out = append(out, ex.Window.toWindow(label))
+		w := ex.Window.toWindow(label)
+		w.Scoped = true
+		out = append(out, w)
 	}
 	return out
 }

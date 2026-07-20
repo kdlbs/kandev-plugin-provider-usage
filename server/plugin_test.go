@@ -494,6 +494,7 @@ func TestHandleWebhook_Overview(t *testing.T) {
 	var report OverviewReport
 	require.NoError(t, json.Unmarshal(resp.Body, &report))
 	require.Equal(t, "claude", report.CurrentProvider, "resolves the session's provider")
+	require.Equal(t, []string{"claude"}, report.PillProviders, "pill defaults to the current provider")
 	require.NotNil(t, report.AllProvidersReport)
 	// The snapshot fields are flattened alongside current_provider.
 	var flat map[string]any
@@ -501,6 +502,32 @@ func TestHandleWebhook_Overview(t *testing.T) {
 	require.Contains(t, flat, "providers")
 	require.Contains(t, flat, "current_provider")
 	require.NotEmpty(t, report.Providers)
+}
+
+func TestOverviewPillProviders(t *testing.T) {
+	sessions := []pluginsdk.Session{session("kandev-sess", "Claude Code")}
+	cases := []struct {
+		name string
+		pill string
+		want []string
+	}{
+		{"default is current", "", []string{"claude"}},
+		{"current + explicit", "current, codex", []string{"claude", "codex"}},
+		{"all", "all", []string{"claude", "codex"}},
+		{"drops unavailable + dedupes", "codex, codex, gemini", []string{"codex"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := codexbarConfig(map[string]any{"providers": "claude,codex", "pill_providers": c.pill})
+			p := newTestPlugin(t, cfg, sessions, perProviderRunner(nil))
+			resp, err := p.HandleWebhook(context.Background(),
+				webhookGet(webhookKeyOverview, "task_id=task-1&active=kandev-sess"))
+			require.NoError(t, err)
+			var report OverviewReport
+			require.NoError(t, json.Unmarshal(resp.Body, &report))
+			require.Equal(t, c.want, report.PillProviders)
+		})
+	}
 }
 
 func TestPollOnceDedupsWithinMaxAge(t *testing.T) {

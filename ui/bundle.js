@@ -41,6 +41,53 @@ function providerLabel(id) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+// Per-provider monogram "icon": a small rounded square in a brand-ish hue. Keeps
+// the bundle self-contained (no bundled brand SVGs); swap for real marks later.
+var PROVIDER_ICON = {
+  claude: { mono: "Cl", bg: "#d97757" },
+  codex: { mono: "Cx", bg: "#10a37f" },
+  gemini: { mono: "Ge", bg: "#4285f4" },
+  grok: { mono: "Gk", bg: "#1f2937" },
+  copilot: { mono: "Co", bg: "#6e5494" },
+  cursor: { mono: "Cu", bg: "#111827" },
+  augment: { mono: "Au", bg: "#6152d9" },
+  opencode: { mono: "Oc", bg: "#f59e0b" },
+  amp: { mono: "Am", bg: "#8b5cf6" },
+};
+
+function providerIconSpec(id) {
+  if (PROVIDER_ICON[id]) return PROVIDER_ICON[id];
+  var s = providerShort(id);
+  return { mono: (s.slice(0, 2) || "?").replace(/^./, function (c) { return c.toUpperCase(); }), bg: "#64748b" };
+}
+
+function providerMonoIcon(h, id, size) {
+  var spec = providerIconSpec(id);
+  var s = size || 15;
+  return h(
+    "span",
+    {
+      "aria-hidden": "true",
+      style: {
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: s + "px",
+        height: s + "px",
+        borderRadius: "4px",
+        background: spec.bg,
+        color: "#fff",
+        fontSize: Math.round(s * 0.52) + "px",
+        fontWeight: 700,
+        lineHeight: 1,
+        letterSpacing: "-0.02em",
+        flex: "0 0 auto",
+      },
+    },
+    spec.mono,
+  );
+}
+
 // tierColor maps a utilization percentage to a bar colour using backend
 // thresholds — soft indigo normally, warming only when high.
 function tierColor(pct, warn, high) {
@@ -76,13 +123,25 @@ function fmtReset(w) {
   return "";
 }
 
-// peakPct returns the highest window utilization for a provider usage object.
+// peakPct returns the highest window utilization for a provider, ignoring scoped
+// windows (e.g. "Fable only") so a niche cap doesn't dominate the glance value.
 function peakPct(usage) {
   var windows = (usage && usage.windows) || [];
   var max = 0;
+  var any = false;
   for (var i = 0; i < windows.length; i++) {
+    if (windows[i].scoped) continue;
     var p = windows[i].utilization_pct;
-    if (typeof p === "number" && p > max) max = p;
+    if (typeof p === "number") {
+      any = true;
+      if (p > max) max = p;
+    }
+  }
+  if (any) return max;
+  // All windows scoped (rare) — fall back to the overall max.
+  for (var j = 0; j < windows.length; j++) {
+    var q = windows[j].utilization_pct;
+    if (typeof q === "number" && q > max) max = q;
   }
   return max;
 }
@@ -359,18 +418,9 @@ function makeTopBarStatus(host) {
     function openNow() { cancelClose(); reposition(); setOpen(true); load(false); }
     function scheduleClose() { cancelClose(); closeTimer.current = setTimeout(function () { setOpen(false); }, 260); }
 
-    // Inline: the current provider's peak %, coloured, once loaded.
+    // Inline: the configured pill providers as [icon %] segments, once loaded.
     var d = state.data;
-    var current = d && d.current_provider ? providerByName(d.providers, d.current_provider) : null;
-    var inline = null;
-    var iconColor;
-    if (current && (current.windows || []).length) {
-      var pk = peakPct(current);
-      iconColor = tierColor(pk, d.warn_threshold, d.high_threshold);
-      // Neutral % text (theme muted-foreground via className); the soft-tinted
-      // gauge icon carries the at-a-glance status.
-      inline = h("span", { style: { fontSize: "11px", fontWeight: 600, fontVariantNumeric: "tabular-nums" } }, fmtPct(pk));
-    }
+    var pill = pillContent(host, d);
 
     return h(
       "div",
@@ -382,13 +432,12 @@ function makeTopBarStatus(host) {
           type: "button",
           variant: "outline",
           size: "sm",
-          className: (inline ? "h-6 gap-1 px-1.5 " : "h-6 w-6 px-0 ") + "rounded-md text-xs font-medium text-muted-foreground hover:text-foreground",
+          className: (pill ? "h-6 gap-1.5 px-2 " : "h-6 w-6 px-0 ") + "rounded-md text-xs font-medium text-muted-foreground hover:text-foreground",
           "aria-label": "Provider usage",
           onFocus: openNow,
           onClick: function () { if (open) { setOpen(false); } else { openNow(); } },
         },
-        gaugeIcon(h, 14, iconColor),
-        inline,
+        pill || gaugeIcon(h, 14),
       ),
       open
         ? h(
@@ -413,6 +462,32 @@ function providerByName(providers, name) {
   var list = providers || [];
   for (var i = 0; i < list.length; i++) if (list[i].provider === name) return list[i];
   return null;
+}
+
+// pillContent renders the configured pill providers as [icon %] segments with a
+// thin separator between them. Returns null until data is loaded / no providers.
+function pillContent(host, d) {
+  var h = host.jsx;
+  var ids = (d && d.pill_providers) || [];
+  var segs = [];
+  ids.forEach(function (id) {
+    var pu = providerByName(d.providers, id);
+    if (!pu) return;
+    var pct = fmtPct(peakPct(pu));
+    if (segs.length) {
+      segs.push(h("span", { key: "sep" + id, style: { width: "1px", alignSelf: "stretch", background: "currentColor", opacity: 0.22, margin: "1px 0" } }));
+    }
+    segs.push(
+      h(
+        "span",
+        { key: "seg" + id, title: providerLabel(id) + " · " + pct + " used", style: { display: "inline-flex", alignItems: "center", gap: "4px" } },
+        providerMonoIcon(h, id, 14),
+        h("span", { style: { fontVariantNumeric: "tabular-nums", fontWeight: 600 } }, pct),
+      ),
+    );
+  });
+  if (!segs.length) return null;
+  return h("span", { style: { display: "inline-flex", alignItems: "center", gap: "6px" } }, segs);
 }
 
 // ==========================================================================

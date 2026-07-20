@@ -43,6 +43,13 @@ const (
 	configKeyAugmentResource = "augment_resource"
 	configKeyAugmentBudget   = "augment_monthly_budget"
 
+	configKeyPillProviders = "pill_providers"
+
+	// pillCurrent / pillAll are tokens in pill_providers standing for the current
+	// session's provider and every available provider.
+	pillCurrent = "current"
+	pillAll     = "all"
+
 	defaultWarnThreshold = 75.0 // % — a window turns amber at or above this
 	defaultHighThreshold = 90.0 // % — a window turns red at or above this
 
@@ -267,15 +274,74 @@ func (p *plugin) providersJSON(ctx context.Context, refresh bool) []byte {
 type OverviewReport struct {
 	*AllProvidersReport
 	CurrentProvider string `json:"current_provider"`
+	// PillProviders is the ordered set of providers the top-bar pill should show
+	// (icon + %), resolved from the pill_providers config.
+	PillProviders []string `json:"pill_providers"`
 }
 
 func (p *plugin) overviewJSON(ctx context.Context, taskID, activeSessionID string, refresh bool) []byte {
 	snap := p.snapshotForRead(ctx, refresh)
+	current := p.resolveProvider(ctx, taskID, activeSessionID)
 	report := OverviewReport{
 		AllProvidersReport: snap,
-		CurrentProvider:    p.resolveProvider(ctx, taskID, activeSessionID),
+		CurrentProvider:    current,
+		PillProviders:      p.pillProviders(ctx, snap, current),
 	}
 	return marshalOr(report, `{"error":"encoding overview report"}`)
+}
+
+// pillProviders resolves which providers the pill shows from the pill_providers
+// config: "current" -> the session provider, "all" -> every provider, else an
+// explicit id. Empty config defaults to the current session's provider. Only
+// providers that actually have usage in the snapshot are kept, order preserved,
+// de-duplicated.
+func (p *plugin) pillProviders(ctx context.Context, snap *AllProvidersReport, current string) []string {
+	available := map[string]bool{}
+	var allIDs []string
+	for _, pr := range snap.Providers {
+		available[pr.Provider] = true
+		allIDs = append(allIDs, pr.Provider)
+	}
+
+	out := []string{}
+	seen := map[string]bool{}
+	add := func(id string) {
+		if id != "" && available[id] && !seen[id] {
+			out = append(out, id)
+			seen[id] = true
+		}
+	}
+
+	tokens := p.configuredList(ctx, configKeyPillProviders)
+	if len(tokens) == 0 {
+		add(current)
+		return out
+	}
+	for _, tok := range tokens {
+		switch tok {
+		case pillCurrent:
+			add(current)
+		case pillAll:
+			for _, id := range allIDs {
+				add(id)
+			}
+		default:
+			add(tok)
+		}
+	}
+	return out
+}
+
+// configuredList parses a comma-separated, lowercased config string into tokens.
+func (p *plugin) configuredList(ctx context.Context, key string) []string {
+	raw, _ := p.config(ctx)[key].(string)
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		if s := strings.ToLower(strings.TrimSpace(part)); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // collectProviders probes codexbar, then queries each provider and partitions
@@ -582,16 +648,9 @@ func (p *plugin) configuredCommand(ctx context.Context) string {
 }
 
 // configuredProviders parses the comma-separated provider allowlist. Empty means
-// "query all providers".
+// "use the curated default set".
 func (p *plugin) configuredProviders(ctx context.Context) []string {
-	raw, _ := p.config(ctx)[configKeyProviders].(string)
-	var out []string
-	for _, part := range strings.Split(raw, ",") {
-		if s := strings.ToLower(strings.TrimSpace(part)); s != "" {
-			out = append(out, s)
-		}
-	}
-	return out
+	return p.configuredList(ctx, configKeyProviders)
 }
 
 // pollInterval reads the background refresh interval from config (minutes),

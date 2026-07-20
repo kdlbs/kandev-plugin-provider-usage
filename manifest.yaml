@@ -61,6 +61,14 @@ config_schema:
         Comma-separated codexbar provider ids to poll, e.g. "claude,codex,gemini".
         Leave empty for a curated default set of local-credential providers. Use
         "all" to sweep every provider codexbar knows about (much slower).
+    pill_providers:
+      type: string
+      title: "Top-bar pill providers"
+      description: >-
+        Which providers to show in the session top-bar pill (each as an icon +
+        %), comma-separated, e.g. "current,claude,codex". Tokens: "current" = the
+        current session's provider, "all" = every provider, or an explicit id.
+        Empty = just the current session's provider.
     poll_interval_minutes:
       type: number
       title: "Refresh interval (minutes)"
