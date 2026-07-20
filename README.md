@@ -12,23 +12,23 @@ Grok, …) plus Augment's own Analytics API.
 A pill in the session top bar (`chat-top-bar` slot) shows the providers you
 pick, each as an icon + %:
 
-![Top-bar pill](https://raw.githubusercontent.com/kdlbs/kandev-provider-usage/0cbed6cfb38b0e642a26158392b71f44170e686d/topbar-pill.png)
+![Top-bar pill](https://raw.githubusercontent.com/kdlbs/kandev-plugin-provider-usage/0cbed6cfb38b0e642a26158392b71f44170e686d/topbar-pill.png)
 
 Hover it to open a panel that cycles through every provider — tabs across the
 top, starting with the one behind the **current session** — with rate-limit
 windows as bars, reset countdowns, and pace:
 
-![Provider panel — Claude](https://raw.githubusercontent.com/kdlbs/kandev-provider-usage/0cbed6cfb38b0e642a26158392b71f44170e686d/panel-claude.png)
+![Provider panel — Claude](https://raw.githubusercontent.com/kdlbs/kandev-plugin-provider-usage/0cbed6cfb38b0e642a26158392b71f44170e686d/panel-claude.png)
 
 Augment shows month-to-date consumption against a budget, plus average/day and
 a projected month-end total:
 
-![Provider panel — Augment](https://raw.githubusercontent.com/kdlbs/kandev-provider-usage/0cbed6cfb38b0e642a26158392b71f44170e686d/panel-augment.png)
+![Provider panel — Augment](https://raw.githubusercontent.com/kdlbs/kandev-plugin-provider-usage/0cbed6cfb38b0e642a26158392b71f44170e686d/panel-augment.png)
 
 Operator settings (**Settings → Plugins → Provider Usage**), generated from the
 manifest's `config_schema` and grouped by source:
 
-![Settings page](https://raw.githubusercontent.com/kdlbs/kandev-provider-usage/0cbed6cfb38b0e642a26158392b71f44170e686d/settings.png)
+![Settings page](https://raw.githubusercontent.com/kdlbs/kandev-plugin-provider-usage/0cbed6cfb38b0e642a26158392b71f44170e686d/settings.png)
 
 ## What it does
 
@@ -115,7 +115,7 @@ make package         # tarball for all 5 supported platforms
 Install the tarball via Settings → Plugins → Install plugin (upload), or:
 
 ```sh
-curl -F package=@kandev-provider-usage-0.1.0.tar.gz \
+curl -F package=@kandev-provider-usage-0.1.1.tar.gz \
   http://localhost:8080/api/plugins/install
 ```
 
