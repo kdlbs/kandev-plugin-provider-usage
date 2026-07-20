@@ -11,12 +11,16 @@
 // current-session provider, computed server-side. This bundle only renders it.
 
 // ---- palette --------------------------------------------------------------
+// Calm by default: normal usage is a soft indigo (not green), and only genuinely
+// high usage warms to amber / muted coral (never a hard red). Text stays neutral
+// so the panel reads calm — the bar fill carries the signal.
 var COLOR = {
-  green: "#10b981",
-  amber: "#f59e0b",
-  red: "#ef4444",
-  accent: "#6366f1",
-  track: "rgba(148,163,184,0.25)",
+  base: "#8085e6", // normal — soft indigo
+  warn: "#e0a95e", // >= warn — soft amber
+  high: "#d97b6c", // >= high — muted coral (not red)
+  accent: "#7c82e8", // UI accents (active tab)
+  accentBg: "rgba(124,130,232,0.13)",
+  track: "rgba(130,140,160,0.16)",
 };
 
 var PROVIDER_LABELS = {
@@ -37,13 +41,14 @@ function providerLabel(id) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-// tierColor maps a utilization percentage to a colour using backend thresholds.
+// tierColor maps a utilization percentage to a bar colour using backend
+// thresholds — soft indigo normally, warming only when high.
 function tierColor(pct, warn, high) {
   var w = typeof warn === "number" ? warn : 75;
   var hi = typeof high === "number" ? high : 90;
-  if (pct >= hi) return COLOR.red;
-  if (pct >= w) return COLOR.amber;
-  return COLOR.green;
+  if (pct >= hi) return COLOR.high;
+  if (pct >= w) return COLOR.warn;
+  return COLOR.base;
 }
 
 function fmtPct(n) {
@@ -121,17 +126,18 @@ function cleanWindow(h, w, warn, high, pace) {
     h(
       "div",
       { style: { display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "12px", fontSize: "11px" } },
-      h("span", { style: { color: color, fontWeight: 600, fontVariantNumeric: "tabular-nums" } }, fmtPct(pct) + " used"),
-      reset ? h("span", { style: { opacity: 0.55 } }, reset) : null,
+      h("span", { style: { fontWeight: 600, fontVariantNumeric: "tabular-nums", opacity: 0.9 } }, fmtPct(pct) + " used"),
+      reset ? h("span", { style: { opacity: 0.5 } }, reset) : null,
     ),
-    pace ? h("div", { style: { fontSize: "10.5px", opacity: 0.5, marginTop: "-1px" } }, pace) : null,
+    pace ? h("div", { style: { fontSize: "10.5px", opacity: 0.45, marginTop: "-1px" } }, pace) : null,
   );
 }
 
-// paceText condenses a codexbar pace side into one muted line.
+// paceText condenses a codexbar pace side to its first clause, e.g.
+// "58% in reserve | Expected 65% used | Lasts until reset" -> "58% in reserve".
 function paceText(pace) {
   if (!pace || !pace.summary) return "";
-  return "Pace: " + pace.summary;
+  return String(pace.summary).split("|")[0].trim();
 }
 
 // relTime renders an RFC3339 timestamp as "just now" / "3m ago" / "2h ago".
@@ -153,39 +159,42 @@ function providerShort(id) {
 }
 
 // ---- one provider's panel (name + plan + updated, then window bars) --------
-function providerPanel(host, p, warn, high, generatedAt, reload) {
+function providerPanel(host, p, warn, high, generatedAt, reload, isCurrent) {
   var h = host.jsx;
   var windows = p.windows || [];
   var paceFor = [p.pace_primary, p.pace_secondary];
 
   return h(
     "div",
-    { style: { display: "flex", flexDirection: "column", gap: "14px" } },
-    // header: name (+ plan right), then "updated · refresh"
+    { style: { display: "flex", flexDirection: "column", gap: "13px" } },
+    // header: name (+ this-session marker) with plan on the right, then meta row
     h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "2px" } },
       h(
         "div",
         { style: { display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "10px" } },
-        h("span", { style: { fontWeight: 700, fontSize: "15px" } }, providerLabel(p.provider)),
-        p.plan ? h("span", { style: { fontSize: "12px", opacity: 0.6, textAlign: "right" } }, p.plan) : null,
+        h(
+          "span",
+          { style: { display: "inline-flex", alignItems: "baseline", gap: "7px", minWidth: 0 } },
+          h("span", { style: { fontWeight: 700, fontSize: "14px" } }, providerLabel(p.provider)),
+          isCurrent ? h("span", { style: { fontSize: "10px", color: COLOR.accent, opacity: 0.85 } }, "this session") : null,
+        ),
+        p.plan ? h("span", { style: { fontSize: "11.5px", opacity: 0.55, textAlign: "right", whiteSpace: "nowrap" } }, p.plan) : null,
       ),
       h(
         "div",
-        { style: { fontSize: "11px", opacity: 0.55, display: "flex", gap: "6px", alignItems: "center" } },
+        { style: { fontSize: "10.5px", opacity: 0.5, display: "flex", gap: "6px", alignItems: "center" } },
         h("span", null, "Updated " + relTime(generatedAt)),
         h("span", { style: { opacity: 0.5 } }, "·"),
-        h("button", { type: "button", onClick: reload, style: { border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "inherit", opacity: 0.85, fontSize: "11px" } }, "Refresh"),
+        h("button", { type: "button", onClick: reload, style: { border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "inherit", opacity: 0.9, fontSize: "10.5px" } }, "Refresh"),
       ),
     ),
-    // Augment-style raw consumption context, when present.
     p.detail ? h("div", { style: { fontSize: "12px", opacity: 0.7 } }, p.detail) : null,
-    // windows
     windows.length
       ? h(
           "div",
-          { style: { display: "flex", flexDirection: "column", gap: "14px" } },
+          { style: { display: "flex", flexDirection: "column", gap: "13px" } },
           windows.map(function (w, i) {
             return h("div", { key: i }, cleanWindow(h, w, warn, high, i < 2 ? paceText(paceFor[i]) : ""));
           }),
@@ -196,12 +205,12 @@ function providerPanel(host, p, warn, high, generatedAt, reload) {
   );
 }
 
-// ---- provider tab strip ---------------------------------------------------
+// ---- provider tab strip (text pills) --------------------------------------
 function tabStrip(host, providers, active, current, onSelect) {
   var h = host.jsx;
   return h(
     "div",
-    { style: { display: "flex", gap: "2px", overflowX: "auto", paddingBottom: "8px", borderBottom: "1px solid " + COLOR.track, marginBottom: "2px" } },
+    { style: { display: "flex", gap: "3px", overflowX: "auto", paddingBottom: "9px", borderBottom: "1px solid " + COLOR.track } },
     providers.map(function (p, i) {
       var isActive = i === active;
       var isCurrent = current && p.provider === current;
@@ -210,26 +219,23 @@ function tabStrip(host, providers, active, current, onSelect) {
         {
           key: p.provider,
           type: "button",
-          title: providerLabel(p.provider) + (isCurrent ? " (this session)" : ""),
+          title: providerLabel(p.provider) + (isCurrent ? " · this session" : ""),
           onClick: function () { onSelect(i); },
           onMouseEnter: function () { onSelect(i); },
           style: {
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: "4px",
-            padding: "5px 9px",
+            padding: "3px 8px",
             border: "none",
-            borderRadius: "9px",
+            borderRadius: "7px",
             cursor: "pointer",
-            background: isActive ? "rgba(99,102,241,0.14)" : "transparent",
+            whiteSpace: "nowrap",
+            fontSize: "11px",
+            fontWeight: isActive ? 600 : 500,
+            background: isActive ? COLOR.accentBg : "transparent",
             color: isActive ? COLOR.accent : "inherit",
-            opacity: isActive ? 1 : 0.62,
-            minWidth: "46px",
+            opacity: isActive ? 1 : 0.58,
           },
         },
-        h("span", { style: { width: "7px", height: "7px", borderRadius: "9999px", background: isActive ? COLOR.accent : (isCurrent ? COLOR.green : COLOR.track) } }),
-        h("span", { style: { fontSize: "10.5px", fontWeight: isActive ? 700 : 500, whiteSpace: "nowrap" } }, providerShort(p.provider)),
+        providerShort(p.provider),
       );
     }),
   );
@@ -258,7 +264,7 @@ function panelBody(host, state, index, setIndex, reload) {
   var h = host.jsx;
   var ui = host.ui;
   var wrap = function (body) {
-    return h("div", { style: { display: "flex", flexDirection: "column", gap: "12px", width: "300px" } }, body);
+    return h("div", { style: { display: "flex", flexDirection: "column", gap: "12px", width: "244px" } }, body);
   };
 
   if (state.loading && !state.data) {
@@ -284,7 +290,7 @@ function panelBody(host, state, index, setIndex, reload) {
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "12px" } },
       providers.length > 1 ? tabStrip(host, providers, i, d.current_provider, setIndex) : null,
-      providerPanel(host, p, d.warn_threshold, d.high_threshold, d.generated_at, reload),
+      providerPanel(host, p, d.warn_threshold, d.high_threshold, d.generated_at, reload, d.current_provider && p.provider === d.current_provider),
     ),
   );
 }
@@ -294,7 +300,7 @@ function panelBody(host, state, index, setIndex, reload) {
 // (anchored to the trigger's rect) so it works regardless of whether the slot
 // sits inside a Radix TooltipProvider, and escapes any overflow clipping on the
 // top bar. Clicking the gauge also toggles it.
-var PANEL_WIDTH = 324;
+var PANEL_WIDTH = 272;
 
 function makeTopBarStatus(host) {
   var React = host.React;
@@ -361,7 +367,9 @@ function makeTopBarStatus(host) {
     if (current && (current.windows || []).length) {
       var pk = peakPct(current);
       iconColor = tierColor(pk, d.warn_threshold, d.high_threshold);
-      inline = h("span", { style: { fontSize: "11px", fontWeight: 600, fontVariantNumeric: "tabular-nums", color: iconColor } }, fmtPct(pk));
+      // Neutral % text (theme muted-foreground via className); the soft-tinted
+      // gauge icon carries the at-a-glance status.
+      inline = h("span", { style: { fontSize: "11px", fontWeight: 600, fontVariantNumeric: "tabular-nums" } }, fmtPct(pk));
     }
 
     return h(
@@ -372,14 +380,14 @@ function makeTopBarStatus(host) {
         {
           id: "provider-usage-topbar",
           type: "button",
-          variant: "ghost",
-          size: inline ? "sm" : "icon",
-          className: (inline ? "h-7 px-1.5 gap-1 " : "h-7 w-7 ") + "cursor-pointer text-muted-foreground hover:text-foreground hover:bg-primary/10",
+          variant: "outline",
+          size: "sm",
+          className: (inline ? "h-6 gap-1 px-1.5 " : "h-6 w-6 px-0 ") + "rounded-md text-xs font-medium text-muted-foreground hover:text-foreground",
           "aria-label": "Provider usage",
           onFocus: openNow,
           onClick: function () { if (open) { setOpen(false); } else { openNow(); } },
         },
-        gaugeIcon(h, 15, iconColor),
+        gaugeIcon(h, 14, iconColor),
         inline,
       ),
       open
@@ -392,7 +400,7 @@ function makeTopBarStatus(host) {
             },
             h(
               ui.Card,
-              { style: { padding: "12px", boxShadow: "0 12px 34px rgba(0,0,0,0.30)" } },
+              { style: { padding: "13px 14px", boxShadow: "0 10px 28px rgba(15,20,40,0.20)" } },
               panelBody(host, state, index, setIndex, function () { load(true); }),
             ),
           )
