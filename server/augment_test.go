@@ -54,6 +54,28 @@ func TestAugment_NoBudgetNoDefault(t *testing.T) {
 	require.Empty(t, u.Windows, "no budget and no default -> no percentage window")
 }
 
+func TestAugment_PaceLine(t *testing.T) {
+	// midMonth = 2026-07-20 UTC -> 19 completed days, 31-day month.
+	c := newAugmentClient(augmentResourceCredits, 0, fakePoster(nil, map[string]postResp{
+		"/cost-analytics":            {200, augCostSample},
+		"/get-user-budget-overrides": {200, `{"overrides":[]}`},
+	}))
+	u, err := c.fetchUsage(context.Background())
+	require.NoError(t, err)
+	// 959232 / 19 ≈ 50.5K/day; * 31 ≈ 1.57M projected.
+	require.Equal(t, "avg 50.5K/day · ~1.57M projected", u.DetailExtra)
+}
+
+func TestAugment_PaceLineEmptyOnFirst(t *testing.T) {
+	c := newAugmentClient(augmentResourceCredits, 0, fakePoster(nil, map[string]postResp{
+		"/get-user-budget-overrides": {200, `{"overrides":[]}`},
+	}))
+	c.now = func() time.Time { return time.Date(2026, 7, 1, 6, 0, 0, 0, time.UTC) }
+	u, err := c.fetchUsage(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, u.DetailExtra, "no completed day yet -> no pace line")
+}
+
 func TestAugment_DefaultBudgetWindow(t *testing.T) {
 	c := newAugmentClient(augmentResourceCredits, 0, fakePoster(nil, map[string]postResp{
 		"/cost-analytics":            {200, augCostSample},

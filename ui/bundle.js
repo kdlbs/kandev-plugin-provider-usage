@@ -271,7 +271,6 @@ function providerPanel(host, p, warn, high, generatedAt, reload, isCurrent) {
         h("button", { type: "button", onClick: reload, style: { border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "inherit", opacity: 0.9, fontSize: "10.5px" } }, "Refresh"),
       ),
     ),
-    p.detail ? h("div", { style: { fontSize: "12px", opacity: 0.7 } }, p.detail) : null,
     windows.length
       ? h(
           "div",
@@ -283,6 +282,15 @@ function providerPanel(host, p, warn, high, generatedAt, reload, isCurrent) {
       : p.detail
         ? null
         : h("div", { style: { fontSize: "12px", opacity: 0.55 } }, "No rate-limit windows reported."),
+    // Augment consumption + pace, sober, below the bar.
+    p.detail
+      ? h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "2px", marginTop: windows.length ? "-2px" : "0" } },
+          h("div", { style: { fontSize: "11.5px", opacity: 0.75, fontVariantNumeric: "tabular-nums" } }, p.detail),
+          p.detail_extra ? h("div", { style: { fontSize: "10.5px", opacity: 0.45, fontVariantNumeric: "tabular-nums" } }, p.detail_extra) : null,
+        )
+      : null,
   );
 }
 

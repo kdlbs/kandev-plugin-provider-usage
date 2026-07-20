@@ -39,11 +39,14 @@ type ProviderUsage struct {
 	// Detail is a human headline for providers whose usage isn't a rate-limit
 	// window percentage — e.g. Augment's raw monthly consumption ("959,232
 	// credits this month"). Empty for codexbar providers.
-	Detail    string    `json:"detail,omitempty"`
-	FetchedAt time.Time `json:"fetched_at"`
-	Source    string    `json:"source,omitempty"` // codexbar source: oauth/web/cli/...
-	PacePrime *Pace     `json:"pace_primary,omitempty"`
-	PaceSec   *Pace     `json:"pace_secondary,omitempty"`
+	Detail string `json:"detail,omitempty"`
+	// DetailExtra is a sober sub-line under Detail — e.g. Augment's per-day
+	// average and projected month-end total.
+	DetailExtra string    `json:"detail_extra,omitempty"`
+	FetchedAt   time.Time `json:"fetched_at"`
+	Source      string    `json:"source,omitempty"` // codexbar source: oauth/web/cli/...
+	PacePrime   *Pace     `json:"pace_primary,omitempty"`
+	PaceSec     *Pace     `json:"pace_secondary,omitempty"`
 }
 
 // --- codexbar JSON wire types (subset of `codexbar usage --format json`) ------

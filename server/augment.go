@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -188,10 +189,11 @@ func (c *augmentClient) call(ctx context.Context, path string, body []byte, out 
 // headline that always carries the raw consumption.
 func (c *augmentClient) toProviderUsage(usage, budget float64) *ProviderUsage {
 	pu := &ProviderUsage{
-		Provider:  "augment",
-		Source:    "analytics",
-		Detail:    augmentAmount(usage, c.isCredits()) + " this month",
-		FetchedAt: c.now().UTC(),
+		Provider:    "augment",
+		Source:      "analytics",
+		Detail:      augmentAmount(usage, c.isCredits()) + " this month",
+		DetailExtra: c.paceLine(usage),
+		FetchedAt:   c.now().UTC(),
 	}
 	label := "Monthly credits"
 	if !c.isCredits() {
@@ -207,6 +209,58 @@ func (c *augmentClient) toProviderUsage(usage, budget float64) *ProviderUsage {
 		}}
 	}
 	return pu
+}
+
+// paceLine builds the sober sub-line: average per completed day and the
+// projected month-end total at that pace. Empty on the 1st (no completed day).
+func (c *augmentClient) paceLine(usage float64) string {
+	elapsed := augmentDaysElapsed(c.now())
+	if elapsed <= 0 || usage <= 0 {
+		return ""
+	}
+	perDay := usage / float64(elapsed)
+	projected := perDay * float64(augmentDaysInMonth(c.now()))
+	return "avg " + augmentAmountCompact(perDay, c.isCredits()) + "/day · ~" +
+		augmentAmountCompact(projected, c.isCredits()) + " projected"
+}
+
+// augmentDaysElapsed is the number of completed days this month (1..yesterday).
+func augmentDaysElapsed(now time.Time) int {
+	return now.UTC().Day() - 1
+}
+
+// augmentDaysInMonth is the number of days in the current UTC month.
+func augmentDaysInMonth(now time.Time) int {
+	u := now.UTC()
+	firstNext := time.Date(u.Year(), u.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 1, 0)
+	return firstNext.AddDate(0, 0, -1).Day()
+}
+
+// augmentAmountCompact formats a number compactly (credits as 50.5K / 1.56M, USD
+// as $X.XX) for the sober sub-line.
+func augmentAmountCompact(v float64, credits bool) string {
+	if !credits {
+		return "$" + strconv.FormatFloat(v, 'f', 2, 64)
+	}
+	switch {
+	case v >= 1e9:
+		return trimZero(strconv.FormatFloat(v/1e9, 'f', 2, 64)) + "B"
+	case v >= 1e6:
+		return trimZero(strconv.FormatFloat(v/1e6, 'f', 2, 64)) + "M"
+	case v >= 1e3:
+		return trimZero(strconv.FormatFloat(v/1e3, 'f', 1, 64)) + "K"
+	default:
+		return withThousands(int64(v))
+	}
+}
+
+// trimZero drops trailing ".0"/".00" and a lone trailing zero from a decimal.
+func trimZero(s string) string {
+	if !strings.Contains(s, ".") {
+		return s
+	}
+	s = strings.TrimRight(s, "0")
+	return strings.TrimRight(s, ".")
 }
 
 // --- helpers ------------------------------------------------------------------
