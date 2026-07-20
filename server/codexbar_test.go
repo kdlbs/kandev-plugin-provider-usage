@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 
 	"github.com/kandev/kandev/pkg/pluginsdk"
@@ -60,6 +61,46 @@ func TestRunUsage_HardFailureWhenNoOutput(t *testing.T) {
 	_, err := runUsage(context.Background(), resolvedCommand{Argv: []string{"codexbar"}}, run, "claude")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found")
+}
+
+func TestRunUsageFast_OAuthHitSkipsFallback(t *testing.T) {
+	var calls int32
+	run := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		atomic.AddInt32(&calls, 1)
+		require.Contains(t, args, "oauth", "fast path forces --source oauth")
+		return []byte("[" + sampleCodexEntry + "]"), nil
+	}
+	entries, err := runUsageFast(context.Background(), resolvedCommand{Argv: []string{"codexbar"}}, run, "codex")
+	require.NoError(t, err)
+	require.True(t, hasUsage(entries))
+	require.Equal(t, int32(1), calls, "oauth returned usage -> no default-source fallback")
+}
+
+func TestRunUsageFast_FallsBackWhenOAuthEmpty(t *testing.T) {
+	var calls int32
+	run := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		n := atomic.AddInt32(&calls, 1)
+		if n == 1 { // oauth attempt: rate-limited error, no usage
+			return []byte("[" + sampleCursorError + "]"), errors.New("exit status 3")
+		}
+		return []byte("[" + sampleClaudeInner() + "]"), nil // default source: usage
+	}
+	entries, err := runUsageFast(context.Background(), resolvedCommand{Argv: []string{"codexbar"}}, run, "claude")
+	require.NoError(t, err)
+	require.True(t, hasUsage(entries))
+	require.Equal(t, int32(2), calls, "oauth had no usage -> fell back to default source")
+}
+
+func TestRunUsageFast_AllSkipsFastPath(t *testing.T) {
+	var calls int32
+	run := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		atomic.AddInt32(&calls, 1)
+		require.NotContains(t, args, "oauth", "the sweep does not force a source")
+		return []byte("[" + sampleCodexEntry + "]"), nil
+	}
+	_, err := runUsageFast(context.Background(), resolvedCommand{Argv: []string{"codexbar"}}, run, providersAll)
+	require.NoError(t, err)
+	require.Equal(t, int32(1), calls)
 }
 
 func TestRunUsage_ResolutionError(t *testing.T) {

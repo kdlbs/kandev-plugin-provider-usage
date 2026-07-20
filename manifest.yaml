@@ -55,9 +55,17 @@ config_schema:
       type: string
       title: "Providers to list"
       description: >-
-        Comma-separated codexbar provider ids to show on the Settings page,
-        e.g. "claude,codex,gemini". Leave empty to query all providers codexbar
-        knows about (slower; unconfigured providers are listed as unavailable).
+        Comma-separated codexbar provider ids to poll, e.g. "claude,codex,gemini".
+        Leave empty for a curated default set of local-credential providers. Use
+        "all" to sweep every provider codexbar knows about (much slower).
+    poll_interval_minutes:
+      type: number
+      title: "Refresh interval (minutes)"
+      description: >-
+        How often the plugin refreshes provider usage in the background. Both the
+        Settings page and the chat-bar icon serve the latest snapshot instantly;
+        the Refresh button forces an immediate update. Default 5, minimum 1.
+      default: 5
     warn_threshold:
       type: number
       title: "Warn threshold (%)"

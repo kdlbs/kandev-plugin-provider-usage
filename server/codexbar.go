@@ -89,18 +89,47 @@ func argvTail(cmd resolvedCommand) []string {
 	return append([]string{}, cmd.Argv[1:]...)
 }
 
-// runUsage runs `codexbar usage --provider <p> --format json` and returns the
-// decoded provider entries. provider may be "all".
+// sourceOAuth is codexbar's fast usage source: a direct HTTP call to the
+// provider's usage endpoint, versus shelling out to the agent CLI (which can
+// take many seconds for e.g. claude). Not every provider supports it.
+const sourceOAuth = "oauth"
+
+// runUsageFast fetches a single provider's usage, trying the fast oauth source
+// first and falling back to codexbar's default (auto) source when oauth returns
+// no usable usage — an unsupported provider, or the oauth endpoint erroring or
+// being rate-limited. `all` is a sweep, not a single provider, so it skips the
+// fast path.
+func runUsageFast(ctx context.Context, cmd resolvedCommand, run runner, provider string) ([]cbEntry, error) {
+	if provider == "" || provider == providersAll {
+		return runUsage(ctx, cmd, run, provider)
+	}
+	if fast, err := runUsageSource(ctx, cmd, run, provider, sourceOAuth); err == nil && hasUsage(fast) {
+		return fast, nil
+	}
+	return runUsage(ctx, cmd, run, provider)
+}
+
+// runUsage runs `codexbar usage --provider <p> --format json` with codexbar's
+// default (auto) source and returns the decoded provider entries. provider may
+// be "all".
+func runUsage(ctx context.Context, cmd resolvedCommand, run runner, provider string) ([]cbEntry, error) {
+	return runUsageSource(ctx, cmd, run, provider, "")
+}
+
+// runUsageSource runs a usage query, optionally forcing codexbar's --source.
 //
 // codexbar exits non-zero when a requested provider is unavailable (e.g. not
 // signed in) yet still writes a valid JSON array carrying per-provider `error`
 // objects to stdout. So the parsed stdout wins: a non-zero exit is only a hard
 // failure when stdout can't be parsed into entries (e.g. the binary is missing).
-func runUsage(ctx context.Context, cmd resolvedCommand, run runner, provider string) ([]cbEntry, error) {
+func runUsageSource(ctx context.Context, cmd resolvedCommand, run runner, provider, source string) ([]cbEntry, error) {
 	if cmd.Err != nil {
 		return nil, cmd.Err
 	}
 	args := append(argvTail(cmd), "usage", "--provider", provider, "--format", "json", "--no-color")
+	if source != "" {
+		args = append(args, "--source", source)
+	}
 	out, runErr := run(ctx, cmd.Argv[0], args...)
 	entries, parseErr := parseCodexbarUsage(out)
 	if parseErr == nil {
@@ -110,6 +139,16 @@ func runUsage(ctx context.Context, cmd resolvedCommand, run runner, provider str
 		return nil, fmt.Errorf("running %s: %w", cmd.Argv[0], runErr)
 	}
 	return nil, parseErr
+}
+
+// hasUsage reports whether any entry carries a usage payload (vs. only errors).
+func hasUsage(entries []cbEntry) bool {
+	for _, e := range entries {
+		if e.Usage != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // providerMatch pairs a codexbar provider id with the lowercase substrings that,

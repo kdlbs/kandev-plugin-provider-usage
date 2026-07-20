@@ -331,7 +331,11 @@ function makeProvidersPage(host) {
         h(
           "div",
           { style: { fontSize: "12px", opacity: 0.6 } },
-          data && data.generated_at ? "Updated " + new Date(data.generated_at).toLocaleTimeString() : "",
+          data && data.generated_at
+            ? "Updated " +
+                new Date(data.generated_at).toLocaleTimeString() +
+                (data.poll_minutes ? " · auto-refreshes every " + Math.round(data.poll_minutes) + " min" : "")
+            : "",
         ),
         h(
           ui.Button,
@@ -506,7 +510,7 @@ window.registerKandevPlugin("kandev-provider-usage", {
       label: "Provider Usage",
       path: "/provider-usage",
       icon: "chart",
-      section: "integrations",
+      section: "main",
     });
     registry.registerRoute("/provider-usage", makeProvidersPage(host), {
       topbar: { subtitle: "Subscription utilization per provider, via the codexbar CLI" },

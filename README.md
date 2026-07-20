@@ -16,6 +16,15 @@ Two surfaces:
 
 Everything is computed backend-side; the UI is a dumb renderer.
 
+## How it stays fast
+
+A background poller refreshes a single snapshot of every provider's utilization
+every few minutes (configurable). Both surfaces serve that snapshot **instantly**
+— codexbar only runs on the timer or when you hit **Refresh**. Each refresh
+tries codexbar's fast `oauth` source first (a quick HTTP call) and falls back to
+the agent CLI only when needed, so a full refresh is ~1s rather than tens of
+seconds.
+
 ## How it gets codexbar
 
 codexbar ships per-platform release binaries (no npm/npx). The plugin resolves
@@ -33,15 +42,16 @@ Utilization is read from your **local** provider credentials/logs (e.g.
 
 ## Settings
 
-| Key              | Meaning                                                                                   |
-| ---------------- | ----------------------------------------------------------------------------------------- |
-| `command`        | Explicit codexbar command. Empty = auto-detect / auto-download.                           |
-| `providers`      | Comma-separated codexbar provider ids for the Settings page. Empty = query all providers. |
-| `warn_threshold` | A window at/above this % turns amber (default 75).                                         |
-| `high_threshold` | A window at/above this % turns red (default 90).                                           |
+| Key                     | Meaning                                                                                         |
+| ----------------------- | ----------------------------------------------------------------------------------------------- |
+| `command`               | Explicit codexbar command. Empty = auto-detect / auto-download.                                 |
+| `providers`             | Comma-separated codexbar provider ids to poll. Empty = curated local set; `"all"` = full sweep. |
+| `poll_interval_minutes` | Background refresh interval (default 5, minimum 1).                                              |
+| `warn_threshold`        | A window at/above this % turns amber (default 75).                                               |
+| `high_threshold`        | A window at/above this % turns red (default 90).                                                 |
 
-Results are cached for 5 minutes; the pages have a **Refresh** button, and
-saving settings restarts the plugin (so changes take effect immediately).
+The pages have a **Refresh** button for an immediate update, and saving settings
+restarts the plugin (so changes take effect immediately).
 
 ## Develop
 

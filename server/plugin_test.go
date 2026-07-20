@@ -8,8 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/kandev/kandev/pkg/pluginsdk"
 	"github.com/stretchr/testify/require"
@@ -71,6 +71,7 @@ func noLookPath(string) (string, error) { return "", errors.New("not found") }
 func newTestPlugin(t *testing.T, config map[string]any, sessions []pluginsdk.Session, run runner) *plugin {
 	t.Helper()
 	p := newPlugin()
+	p.disablePoller = true // build the snapshot synchronously in the webhook path
 	p.lookPath = noLookPath
 	p.run = run
 	p.dl = &downloader{
@@ -88,18 +89,45 @@ func webhookGet(key, query string) *pluginsdk.WebhookRequest {
 	return &pluginsdk.WebhookRequest{WebhookKey: key, Method: "GET", Query: query}
 }
 
-// usageRunner answers `--version` probes and `usage` runs distinctly, counting
-// usage invocations.
-func usageRunner(usageCalls *int, out []byte, err error) runner {
+// usageRunner answers `--version` probes and returns `out`/`err` for any usage
+// run, counting usage invocations atomically (the providers path runs providers
+// concurrently).
+func usageRunner(usageCalls *int32, out []byte, err error) runner {
 	return func(_ context.Context, _ string, args ...string) ([]byte, error) {
 		if len(args) > 0 && args[len(args)-1] == "--version" {
 			return []byte("CodexBar 0.45.2\n"), nil
 		}
 		if usageCalls != nil {
-			*usageCalls++
+			atomic.AddInt32(usageCalls, 1)
 		}
 		return out, err
 	}
+}
+
+// providerRunner returns per-provider output keyed by the `--provider` value; a
+// provider absent from the map returns an exec error (unavailable).
+func providerRunner(usageCalls *int32, byProvider map[string][]byte) runner {
+	return func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if len(args) > 0 && args[len(args)-1] == "--version" {
+			return []byte("CodexBar 0.45.2\n"), nil
+		}
+		if usageCalls != nil {
+			atomic.AddInt32(usageCalls, 1)
+		}
+		if out, ok := byProvider[argValue(args, "--provider")]; ok {
+			return out, nil
+		}
+		return []byte("[]"), errors.New("exit status 1")
+	}
+}
+
+func argValue(args []string, flag string) string {
+	for i, a := range args {
+		if a == flag && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
 }
 
 func codexbarConfig(extra map[string]any) map[string]any {
@@ -165,9 +193,20 @@ func TestHandleWebhook_StatusDegradesWhenMissing(t *testing.T) {
 
 // --- providers webhook --------------------------------------------------------
 
+// perProviderRunner maps the three sample providers by their --provider value;
+// everything else (e.g. the rest of the default set) errors → unavailable.
+func perProviderRunner(calls *int32) runner {
+	return providerRunner(calls, map[string][]byte{
+		"claude": []byte("[" + sampleClaudeInner() + "]"),
+		"codex":  []byte("[" + sampleCodexEntry + "]"),
+		"cursor": []byte("[" + sampleCursorError + "]"),
+	})
+}
+
 func TestHandleWebhook_ProvidersPartitions(t *testing.T) {
-	calls := 0
-	p := newTestPlugin(t, codexbarConfig(nil), nil, usageRunner(&calls, sampleAll(), nil))
+	var calls int32
+	cfg := codexbarConfig(map[string]any{"providers": "claude, codex, cursor"})
+	p := newTestPlugin(t, cfg, nil, perProviderRunner(&calls))
 
 	resp, err := p.HandleWebhook(context.Background(), webhookGet(webhookKeyProviders, ""))
 	require.NoError(t, err)
@@ -177,32 +216,49 @@ func TestHandleWebhook_ProvidersPartitions(t *testing.T) {
 	require.NoError(t, json.Unmarshal(resp.Body, &report))
 	require.True(t, report.Codexbar.Installed)
 	require.Len(t, report.Providers, 2, "claude + codex have usage")
-	require.Len(t, report.Unavailable, 1, "cursor is unavailable")
+	require.Len(t, report.Unavailable, 1, "cursor reports an error entry")
 	require.Equal(t, "cursor", report.Unavailable[0].Provider)
 	require.Equal(t, defaultWarnThreshold, report.WarnThreshold)
 	require.Equal(t, defaultHighThreshold, report.HighThreshold)
-	require.Equal(t, 1, calls, "one `--provider all` run")
+	// >= 3: each provider is queried once; providers with no usage on the fast
+	// oauth source are retried once on the default source.
+	require.GreaterOrEqual(t, calls, int32(3))
 }
 
-func TestHandleWebhook_ProvidersConfiguredList(t *testing.T) {
-	calls := 0
-	cfg := codexbarConfig(map[string]any{"providers": "claude, codex"})
-	// Each per-provider run returns just its own entry; the runner echoes the
-	// same sample regardless, so both configured providers resolve to claude —
-	// what matters is one run per configured provider.
-	p := newTestPlugin(t, cfg, nil, usageRunner(&calls, []byte("["+sampleClaudeInner()+"]"), nil))
+func TestHandleWebhook_ProvidersDefaultSet(t *testing.T) {
+	var calls int32
+	// No `providers` config -> the curated default set is queried; providers
+	// absent from the runner map surface as unavailable.
+	p := newTestPlugin(t, codexbarConfig(nil), nil, perProviderRunner(&calls))
 
 	resp, err := p.HandleWebhook(context.Background(), webhookGet(webhookKeyProviders, ""))
 	require.NoError(t, err)
 
 	var report AllProvidersReport
 	require.NoError(t, json.Unmarshal(resp.Body, &report))
-	require.Equal(t, 2, calls, "one run per configured provider")
-	require.NotEmpty(t, report.Providers)
+	require.GreaterOrEqual(t, calls, int32(len(defaultProviders)), "at least one run per default provider")
+	require.Len(t, report.Providers, 2, "only claude + codex have usage in the default set")
+	// cursor (error entry) + the default providers with no mapping are unavailable.
+	require.NotEmpty(t, report.Unavailable)
+}
+
+func TestHandleWebhook_ProvidersAllSweep(t *testing.T) {
+	var calls int32
+	cfg := codexbarConfig(map[string]any{"providers": "all"})
+	p := newTestPlugin(t, cfg, nil, usageRunner(&calls, sampleAll(), nil))
+
+	resp, err := p.HandleWebhook(context.Background(), webhookGet(webhookKeyProviders, ""))
+	require.NoError(t, err)
+
+	var report AllProvidersReport
+	require.NoError(t, json.Unmarshal(resp.Body, &report))
+	require.Equal(t, int32(1), calls, `"all" is a single codexbar sweep`)
+	require.Len(t, report.Providers, 2)
+	require.Len(t, report.Unavailable, 1)
 }
 
 func TestHandleWebhook_ProvidersDegradesWhenMissing(t *testing.T) {
-	run := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+	run := func(context.Context, string, ...string) ([]byte, error) {
 		return nil, errors.New("exec: codexbar: not found")
 	}
 	p := newTestPlugin(t, codexbarConfig(nil), nil, run)
@@ -213,32 +269,34 @@ func TestHandleWebhook_ProvidersDegradesWhenMissing(t *testing.T) {
 
 	var report AllProvidersReport
 	require.NoError(t, json.Unmarshal(resp.Body, &report))
-	require.False(t, report.Codexbar.Installed)
+	require.False(t, report.Codexbar.Installed, "probe fails -> degraded")
 	require.Empty(t, report.Providers)
+	require.Empty(t, report.Unavailable, "no providers are queried once the probe fails")
 }
 
 func TestHandleWebhook_ProvidersCached(t *testing.T) {
-	calls := 0
-	p := newTestPlugin(t, codexbarConfig(nil), nil, usageRunner(&calls, sampleAll(), nil))
+	var calls int32
+	cfg := codexbarConfig(map[string]any{"providers": "claude"})
+	p := newTestPlugin(t, cfg, nil, perProviderRunner(&calls))
 	ctx := context.Background()
 
 	_, err := p.HandleWebhook(ctx, webhookGet(webhookKeyProviders, ""))
 	require.NoError(t, err)
 	_, err = p.HandleWebhook(ctx, webhookGet(webhookKeyProviders, ""))
 	require.NoError(t, err)
-	require.Equal(t, 1, calls, "second hit inside TTL serves the cache")
+	require.Equal(t, int32(1), calls, "second hit inside TTL serves the cache")
 
 	_, err = p.HandleWebhook(ctx, webhookGet(webhookKeyProviders, "refresh=1"))
 	require.NoError(t, err)
-	require.Equal(t, 2, calls, "refresh=1 bypasses the cache")
+	require.Equal(t, int32(2), calls, "refresh=1 bypasses the cache")
 }
 
 // --- session webhook ----------------------------------------------------------
 
 func TestHandleWebhook_SessionResolvesProvider(t *testing.T) {
+	// The chat icon serves from the same polled snapshot as the Settings page.
 	sessions := []pluginsdk.Session{session("kandev-sess", "Claude Code")}
-	p := newTestPlugin(t, codexbarConfig(nil), sessions,
-		usageRunner(nil, []byte("["+sampleClaudeInner()+"]"), nil))
+	p := newTestPlugin(t, codexbarConfig(nil), sessions, perProviderRunner(nil))
 
 	resp, err := p.HandleWebhook(context.Background(),
 		webhookGet(webhookKeySession, "task_id=task-1&active=kandev-sess"))
@@ -256,7 +314,7 @@ func TestHandleWebhook_SessionResolvesProvider(t *testing.T) {
 
 func TestHandleWebhook_SessionUnknownProvider(t *testing.T) {
 	sessions := []pluginsdk.Session{session("kandev-sess", "Mystery Agent")}
-	p := newTestPlugin(t, codexbarConfig(nil), sessions, usageRunner(nil, sampleAll(), nil))
+	p := newTestPlugin(t, codexbarConfig(nil), sessions, perProviderRunner(nil))
 
 	resp, err := p.HandleWebhook(context.Background(),
 		webhookGet(webhookKeySession, "task_id=task-1&active=kandev-sess"))
@@ -270,10 +328,10 @@ func TestHandleWebhook_SessionUnknownProvider(t *testing.T) {
 }
 
 func TestHandleWebhook_SessionProviderError(t *testing.T) {
+	// cursor is in the default polled set and reports an error entry in the
+	// snapshot; the session picks that up as its error.
 	sessions := []pluginsdk.Session{session("kandev-sess", "Cursor Agent")}
-	// codexbar returns the cursor error entry with a non-zero exit.
-	p := newTestPlugin(t, codexbarConfig(nil), sessions,
-		usageRunner(nil, []byte("["+sampleCursorError+"]"), errors.New("exit status 1")))
+	p := newTestPlugin(t, codexbarConfig(nil), sessions, perProviderRunner(nil))
 
 	resp, err := p.HandleWebhook(context.Background(),
 		webhookGet(webhookKeySession, "task_id=task-1&active=kandev-sess"))
@@ -286,10 +344,28 @@ func TestHandleWebhook_SessionProviderError(t *testing.T) {
 	require.Contains(t, report.Error, "Cursor")
 }
 
+func TestHandleWebhook_SessionOnDemandForUnpolledProvider(t *testing.T) {
+	// Operator narrowed the polled set to codex, but the session runs claude —
+	// the snapshot doesn't cover it, so the session fetches claude on demand.
+	cfg := codexbarConfig(map[string]any{"providers": "codex"})
+	sessions := []pluginsdk.Session{session("kandev-sess", "Claude Code")}
+	p := newTestPlugin(t, cfg, sessions, perProviderRunner(nil))
+
+	resp, err := p.HandleWebhook(context.Background(),
+		webhookGet(webhookKeySession, "task_id=task-1&active=kandev-sess"))
+	require.NoError(t, err)
+
+	var report SessionUsageReport
+	require.NoError(t, json.Unmarshal(resp.Body, &report))
+	require.Equal(t, "claude", report.Provider)
+	require.NotNil(t, report.Usage, "claude fetched on demand though outside the polled set")
+	require.Equal(t, "claude", report.Usage.Provider)
+}
+
 func TestHandleWebhook_SessionThresholdsFromConfig(t *testing.T) {
 	cfg := codexbarConfig(map[string]any{"warn_threshold": 60.0, "high_threshold": 85.0})
 	sessions := []pluginsdk.Session{session("kandev-sess", "Claude Code")}
-	p := newTestPlugin(t, cfg, sessions, usageRunner(nil, []byte("["+sampleClaudeInner()+"]"), nil))
+	p := newTestPlugin(t, cfg, sessions, perProviderRunner(nil))
 
 	resp, err := p.HandleWebhook(context.Background(),
 		webhookGet(webhookKeySession, "task_id=task-1&active=kandev-sess"))
@@ -301,40 +377,39 @@ func TestHandleWebhook_SessionThresholdsFromConfig(t *testing.T) {
 	require.Equal(t, 85.0, report.HighThreshold)
 }
 
-func TestHandleWebhook_SessionCachedPerProvider(t *testing.T) {
-	calls := 0
+func TestSessionAndProvidersShareSnapshot(t *testing.T) {
+	// A session read serves the snapshot built by the first read; a second read
+	// (session or providers) doesn't re-run codexbar until a refresh.
+	var calls int32
 	sessions := []pluginsdk.Session{session("kandev-sess", "Claude Code")}
-	p := newTestPlugin(t, codexbarConfig(nil), sessions,
-		usageRunner(&calls, []byte("["+sampleClaudeInner()+"]"), nil))
+	p := newTestPlugin(t, codexbarConfig(nil), sessions, perProviderRunner(&calls))
 	ctx := context.Background()
 	q := "task_id=task-1&active=kandev-sess"
 
 	_, err := p.HandleWebhook(ctx, webhookGet(webhookKeySession, q))
 	require.NoError(t, err)
-	_, err = p.HandleWebhook(ctx, webhookGet(webhookKeySession, q))
+	first := atomic.LoadInt32(&calls)
+	require.Positive(t, first, "first read builds the snapshot")
+
+	_, err = p.HandleWebhook(ctx, webhookGet(webhookKeyProviders, ""))
 	require.NoError(t, err)
-	require.Equal(t, 1, calls, "second hit inside TTL serves the cached provider usage")
+	require.Equal(t, first, atomic.LoadInt32(&calls), "providers read serves the same snapshot")
 
 	_, err = p.HandleWebhook(ctx, webhookGet(webhookKeySession, q+"&refresh=1"))
 	require.NoError(t, err)
-	require.Equal(t, 2, calls, "refresh=1 bypasses the cache")
+	require.Greater(t, atomic.LoadInt32(&calls), first, "refresh=1 rebuilds the snapshot")
 }
 
-func TestProvidersCacheExpires(t *testing.T) {
-	calls := 0
-	p := newTestPlugin(t, codexbarConfig(nil), nil, usageRunner(&calls, sampleAll(), nil))
-	current := time.Unix(1000, 0)
-	p.now = func() time.Time { return current }
+func TestPollOnceDedupsWithinMaxAge(t *testing.T) {
+	var calls int32
+	cfg := codexbarConfig(map[string]any{"providers": "claude"})
+	p := newTestPlugin(t, cfg, nil, perProviderRunner(&calls))
 	ctx := context.Background()
 
-	_, err := p.HandleWebhook(ctx, webhookGet(webhookKeyProviders, ""))
-	require.NoError(t, err)
-	_, err = p.HandleWebhook(ctx, webhookGet(webhookKeyProviders, ""))
-	require.NoError(t, err)
-	require.Equal(t, 1, calls)
+	p.pollOnce(ctx, cacheTTL)
+	p.pollOnce(ctx, cacheTTL)
+	require.Equal(t, int32(1), atomic.LoadInt32(&calls), "second poll within maxAge reuses the snapshot")
 
-	current = current.Add(cacheTTL + time.Second)
-	_, err = p.HandleWebhook(ctx, webhookGet(webhookKeyProviders, ""))
-	require.NoError(t, err)
-	require.Equal(t, 2, calls, "expired cache re-runs codexbar")
+	p.pollOnce(ctx, 0)
+	require.Equal(t, int32(2), atomic.LoadInt32(&calls), "maxAge 0 forces a rebuild")
 }
