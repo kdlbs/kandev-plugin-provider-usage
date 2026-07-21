@@ -74,7 +74,7 @@ Settings → Plugins → Provider Usage (generated from the manifest
 
 | Key                       | Meaning                                                                                                     |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `augment_api_token`        | Augment Analytics service-account token (stored as a secret — masked in the UI). Enables the Augment card.  |
+| `augment_api_token`        | Augment Analytics service-account token (stored as a secret — masked in the UI). Enables the Augment card. Create one at [app.augmentcode.com/settings/personal-api-tokens](https://app.augmentcode.com/settings/personal-api-tokens). |
 | `augment_email`             | Your Augment org email, used to filter Analytics to your usage.                                             |
 | `augment_monthly_budget`    | Budget for the used-of-budget %. Empty = a per-user Analytics override, else a 2,500,000-credit default.   |
 | `augment_resource`          | `credits` (default) or `usd` — which metric your Augment plan bills.                                        |
@@ -87,6 +87,11 @@ Settings → Plugins → Provider Usage (generated from the manifest
 
 Saving settings restarts the plugin, so changes take effect immediately; the
 panel also has a **Refresh** button for an on-demand update.
+
+Below the settings form, an **Integration status** card shows live health at a
+glance — whether the codexbar CLI resolved (with version + how it was found) and
+whether the Augment Analytics API is reachable — with a re-check button. It
+renders inline via the host's `plugin-settings` slot.
 
 ## Layout
 

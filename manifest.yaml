@@ -54,9 +54,10 @@ config_schema:
       secret: true
       title: "Augment · API token"
       description: >-
-        Augment Analytics service-account token. With the email below, adds an
-        Augment card + pill entry showing monthly consumption via Augment's
-        Analytics API. Stored as a secret.
+        Augment Analytics service-account token. Create one at
+        https://app.augmentcode.com/settings/personal-api-tokens. With the email
+        below, adds an Augment card + pill entry showing monthly consumption via
+        Augment's Analytics API. Stored as a secret.
     augment_email:
       type: string
       title: "Augment · Account email"
