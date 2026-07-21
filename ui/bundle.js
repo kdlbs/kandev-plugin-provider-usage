@@ -13,6 +13,12 @@
 // webhook, the settings card the "providers" webhook. Both return the poller's
 // warm snapshot computed server-side — this bundle only renders it.
 
+// AUTO_REFRESH_MS is how often the UI silently re-reads the backend's warm
+// snapshot so an open panel / settings card / top-bar pill keeps up with the
+// server-side poller (which refreshes every provider, Augment included). The
+// re-read hits the cached snapshot (no `refresh=1`), so it's cheap.
+var AUTO_REFRESH_MS = 60 * 1000;
+
 // ---- palette --------------------------------------------------------------
 // Calm by default: normal usage is a soft indigo (not green), and only genuinely
 // high usage warms to amber / muted coral (never a hard red). Text stays neutral
@@ -421,25 +427,49 @@ function makeTopBarStatus(host) {
     var wrapRef = React.useRef(null);
     var closeTimer = React.useRef(null);
 
-    function load(force) {
+    // fetchOverview reads the overview webhook. backendRefresh forces the server
+    // to re-run codexbar (expensive); silent skips the loading flash and keeps
+    // the current data/index so a periodic re-read doesn't flicker the panel.
+    function fetchOverview(opts) {
+      opts = opts || {};
       var active = ctx.activeSessionId || "";
-      if (!force && loadedForRef.current === active && state.data) return;
       loadedForRef.current = active;
-      setState(function (s) { return { loading: true, data: force ? s.data : null, error: null }; });
+      if (!opts.silent) {
+        setState(function (s) { return { loading: true, data: opts.backendRefresh ? s.data : null, error: null }; });
+      }
       var qs =
         "webhooks/overview?task_id=" +
         encodeURIComponent(ctx.taskId || "") +
         "&active=" +
         encodeURIComponent(active) +
-        (force ? "&refresh=1" : "");
+        (opts.backendRefresh ? "&refresh=1" : "");
       host.api
         .fetch(qs)
         .then(function (r) { return r.json(); })
-        .then(function (data) { setState({ loading: false, data: data, error: null }); setIndex(0); })
-        .catch(function (err) { setState({ loading: false, data: null, error: String(err && err.message ? err.message : err) }); });
+        .then(function (data) {
+          setState({ loading: false, data: data, error: null });
+          if (!opts.silent) setIndex(0);
+        })
+        .catch(function (err) {
+          if (opts.silent) return; // keep the last good render on a transient poll failure
+          setState({ loading: false, data: null, error: String(err && err.message ? err.message : err) });
+        });
+    }
+
+    function load(force) {
+      var active = ctx.activeSessionId || "";
+      if (!force && loadedForRef.current === active && state.data) return;
+      fetchOverview({ backendRefresh: force });
     }
 
     React.useEffect(function () { loadedForRef.current = null; load(false); }, [ctx.activeSessionId]);
+
+    // Keep the pill / open panel in step with the backend poller by silently
+    // re-reading the warm snapshot on an interval.
+    React.useEffect(function () {
+      var id = setInterval(function () { fetchOverview({ silent: true }); }, AUTO_REFRESH_MS);
+      return function () { clearInterval(id); };
+    }, [ctx.activeSessionId, ctx.taskId]);
 
     function reposition() {
       var el = wrapRef.current;
@@ -766,16 +796,33 @@ function makeSettingsStatus(host) {
     var state = stateHook[0];
     var setState = stateHook[1];
 
-    function load(force) {
-      setState(function (s) { return { loading: true, data: s.data, error: null }; });
+    // force re-runs codexbar server-side; silent re-reads the warm snapshot
+    // without a loading flash so the card refreshes in place.
+    function fetchProviders(opts) {
+      opts = opts || {};
+      if (!opts.silent) {
+        setState(function (s) { return { loading: true, data: s.data, error: null }; });
+      }
       host.api
-        .fetch("webhooks/providers" + (force ? "?refresh=1" : ""))
+        .fetch("webhooks/providers" + (opts.backendRefresh ? "?refresh=1" : ""))
         .then(function (r) { return r.json(); })
         .then(function (data) { setState({ loading: false, data: data, error: null }); })
-        .catch(function (err) { setState({ loading: false, data: null, error: String(err && err.message ? err.message : err) }); });
+        .catch(function (err) {
+          if (opts.silent) return; // keep the last good render on a transient poll failure
+          setState({ loading: false, data: null, error: String(err && err.message ? err.message : err) });
+        });
     }
 
+    function load(force) { fetchProviders({ backendRefresh: force }); }
+
     React.useEffect(function () { load(false); }, []);
+
+    // Reflect the backend poller's updates (Augment consumption included) while
+    // the card stays open, by silently re-reading the warm snapshot.
+    React.useEffect(function () {
+      var id = setInterval(function () { fetchProviders({ silent: true }); }, AUTO_REFRESH_MS);
+      return function () { clearInterval(id); };
+    }, []);
 
     return h(ui.Card, { style: { padding: "16px 18px" } }, settingsStatusBody(host, state, function () { load(true); }));
   };
