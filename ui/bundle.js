@@ -1,14 +1,17 @@
 // Provider Usage — kandev plugin UI bundle.
 //
 // Hand-written, NO-BUILD plain-JS ES module (shared host React via host.jsx —
-// never bundles its own React). Registers ONE component into the "chat-top-bar"
-// slot: a gauge in the session top bar that, on hover, opens a panel cycling
-// through every provider's subscription utilization — starting with the
-// provider that backs the current session.
+// never bundles its own React). Registers two components:
+//   • "chat-top-bar" — a gauge in the session top bar that, on hover, opens a
+//     panel cycling through every provider's subscription utilization, starting
+//     with the provider that backs the current session.
+//   • "plugin-settings" — an integration-status card on the plugin's own
+//     settings page (Settings → Plugins → Provider Usage) showing whether the
+//     codexbar CLI resolved and whether the Augment API is reachable.
 //
-// All data comes from this plugin's Go backend via the "overview" webhook,
-// which returns the poller's warm snapshot (every provider) plus the resolved
-// current-session provider, computed server-side. This bundle only renders it.
+// All data comes from this plugin's Go backend: the top bar reads the "overview"
+// webhook, the settings card the "providers" webhook. Both return the poller's
+// warm snapshot computed server-side — this bundle only renders it.
 
 // ---- palette --------------------------------------------------------------
 // Calm by default: normal usage is a soft indigo (not green), and only genuinely
@@ -524,9 +527,264 @@ function pillContent(host, d) {
   return h("span", { style: { display: "inline-flex", alignItems: "center", gap: "6px" } }, segs);
 }
 
+// ---- the plugin-settings status card --------------------------------------
+// Renders inline on Settings → Plugins → Provider Usage (host "plugin-settings"
+// slot) so the operator can tell at a glance whether the codexbar CLI resolved
+// and whether the Augment API is reachable. Everything comes from the warm
+// "providers" snapshot — codexbar install status plus per-provider errors
+// (Augment included) — so no extra backend endpoint is needed.
+
+// Health uses a muted green / coral pair (never a hard red), matching the calm
+// palette used by the usage bars.
+var OK_COLOR = "#5aa86f";
+// Compact "source: X" label for the codexbar row (how the CLI resolved).
+var SOURCE_LABEL = { settings: "settings", path: "PATH", download: "download" };
+
+function healthGlyph(h, ok) {
+  var common = {
+    width: 12,
+    height: 12,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 3,
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    "aria-hidden": "true",
+  };
+  return ok
+    ? h("svg", common, h("path", { d: "M20 6 L9 17 L4 12" }))
+    : h("svg", common, h("path", { d: "M6 6 L18 18" }), h("path", { d: "M18 6 L6 18" }));
+}
+
+// statusIcon: a bordered circle with a check (ok) or cross (bad), tinted by health.
+function statusIcon(h, ok) {
+  var color = ok ? OK_COLOR : COLOR.high;
+  return h(
+    "span",
+    {
+      "aria-hidden": "true",
+      style: {
+        width: "22px",
+        height: "22px",
+        borderRadius: "9999px",
+        flex: "0 0 auto",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        border: "1.5px solid " + color,
+        background: ok ? "rgba(90,168,111,0.12)" : "rgba(217,123,108,0.12)",
+        color: color,
+      },
+    },
+    healthGlyph(h, ok),
+  );
+}
+
+// statusBadge: the right-aligned outlined pill ("working" / "success" / "missing" / "error").
+function statusBadge(h, ok, label) {
+  var color = ok ? OK_COLOR : COLOR.high;
+  return h(
+    "span",
+    {
+      style: {
+        fontSize: "11px",
+        fontWeight: 600,
+        padding: "2px 9px",
+        borderRadius: "9999px",
+        whiteSpace: "nowrap",
+        flex: "0 0 auto",
+        color: color,
+        border: "1px solid " + (ok ? "rgba(90,168,111,0.5)" : "rgba(217,123,108,0.5)"),
+        background: ok ? "rgba(90,168,111,0.10)" : "rgba(217,123,108,0.10)",
+      },
+    },
+    label,
+  );
+}
+
+// statusRow: icon · (title + mono detail) · badge. opts = { ok, title, detail, badge }.
+function statusRow(h, opts) {
+  return h(
+    "div",
+    { style: { display: "flex", alignItems: "center", gap: "11px" } },
+    statusIcon(h, opts.ok),
+    h(
+      "div",
+      { style: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0, flex: "1 1 auto" } },
+      h("div", { style: { fontSize: "13.5px", fontWeight: 700 } }, opts.title),
+      opts.detail
+        ? h(
+            "div",
+            {
+              style: {
+                fontSize: "11.5px",
+                opacity: 0.55,
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                wordBreak: "break-word",
+              },
+            },
+            opts.detail,
+          )
+        : null,
+    ),
+    opts.badge ? statusBadge(h, opts.ok, opts.badge) : null,
+  );
+}
+
+// codexbarRow: ✅ "working" with version + how it resolved, else ❌ "missing" with the probe error.
+function codexbarRow(h, st) {
+  st = st || {};
+  if (st.installed) {
+    var bits = [];
+    if (st.version) bits.push("v" + st.version);
+    bits.push("source: " + (SOURCE_LABEL[st.source] || st.source || "unknown"));
+    return statusRow(h, { ok: true, title: "codexbar CLI", detail: bits.join(" · "), badge: "working" });
+  }
+  return statusRow(h, {
+    ok: false,
+    title: "codexbar CLI",
+    detail: st.error || "not found — set a path in the settings above",
+    badge: "missing",
+  });
+}
+
+// augmentRow: shown only when Augment is configured — ✅ "success" with the month's
+// consumption when it made it into the provider list, ❌ "error" (with the API
+// message) when it landed in `unavailable`, otherwise null (no token/email set).
+function augmentRow(h, d) {
+  var providers = (d && d.providers) || [];
+  for (var i = 0; i < providers.length; i++) {
+    if (providers[i].provider === "augment") {
+      return statusRow(h, {
+        ok: true,
+        title: "Augment Analytics API",
+        detail: providers[i].detail || "authenticated",
+        badge: "success",
+      });
+    }
+  }
+  var unavailable = (d && d.unavailable) || [];
+  for (var j = 0; j < unavailable.length; j++) {
+    if (unavailable[j].provider === "augment") {
+      return statusRow(h, {
+        ok: false,
+        title: "Augment Analytics API",
+        detail: unavailable[j].message || "unreachable",
+        badge: "error",
+      });
+    }
+  }
+  return null;
+}
+
+// refreshGlyph: a circular-arrows icon for the header re-check affordance.
+function refreshGlyph(h) {
+  return h(
+    "svg",
+    {
+      width: 13,
+      height: 13,
+      viewBox: "0 0 24 24",
+      fill: "none",
+      stroke: "currentColor",
+      strokeWidth: 2,
+      strokeLinecap: "round",
+      strokeLinejoin: "round",
+      "aria-hidden": "true",
+      style: { flex: "0 0 auto" },
+    },
+    h("path", { d: "M3 12a9 9 0 0 1 15-6.7L21 8" }),
+    h("path", { d: "M21 3v5h-5" }),
+    h("path", { d: "M21 12a9 9 0 0 1-15 6.7L3 16" }),
+    h("path", { d: "M3 21v-5h5" }),
+  );
+}
+
+function settingsStatusBody(host, state, reload) {
+  var h = host.jsx;
+  var d = state.data;
+
+  var when = state.loading ? "checking…" : d && d.generated_at ? "refreshed " + relTime(d.generated_at) : "";
+  var header = h(
+    "div",
+    { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", marginBottom: "12px" } },
+    h("div", { style: { fontSize: "15px", fontWeight: 700 } }, "Integration status"),
+    h(
+      "button",
+      {
+        type: "button",
+        onClick: reload,
+        disabled: state.loading,
+        title: "Re-check integrations",
+        style: {
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "5px",
+          border: "none",
+          background: "transparent",
+          padding: 0,
+          cursor: state.loading ? "default" : "pointer",
+          color: "inherit",
+          opacity: state.loading ? 0.45 : 0.7,
+          fontSize: "11.5px",
+        },
+      },
+      refreshGlyph(h),
+      when ? h("span", null, when) : null,
+    ),
+  );
+
+  var body;
+  if (state.error) {
+    body = h("div", { style: { fontSize: "12px", color: COLOR.high } }, "Couldn't load status: " + state.error);
+  } else if (!d) {
+    body = h("div", { style: { fontSize: "12px", opacity: 0.6 } }, "Checking integrations…");
+  } else {
+    body = h(
+      "div",
+      { style: { display: "flex", flexDirection: "column", gap: "14px" } },
+      codexbarRow(h, d.codexbar),
+      augmentRow(h, d),
+    );
+  }
+  return h("div", null, header, body);
+}
+
+function makeSettingsStatus(host) {
+  var React = host.React;
+  var h = host.jsx;
+  var ui = host.ui;
+
+  return function SettingsStatus(props) {
+    var ctx = (props && props.slotProps) || {};
+    // The host scopes this slot to the plugin whose page is open; guard defensively
+    // so we never render on another plugin's settings page.
+    if (ctx.pluginId && ctx.pluginId !== "kandev-provider-usage") return null;
+
+    var stateHook = React.useState({ loading: true, data: null, error: null });
+    var state = stateHook[0];
+    var setState = stateHook[1];
+
+    function load(force) {
+      setState(function (s) { return { loading: true, data: s.data, error: null }; });
+      host.api
+        .fetch("webhooks/providers" + (force ? "?refresh=1" : ""))
+        .then(function (r) { return r.json(); })
+        .then(function (data) { setState({ loading: false, data: data, error: null }); })
+        .catch(function (err) { setState({ loading: false, data: null, error: String(err && err.message ? err.message : err) }); });
+    }
+
+    React.useEffect(function () { load(false); }, []);
+
+    return h(ui.Card, { style: { padding: "16px 18px" } }, settingsStatusBody(host, state, function () { load(true); }));
+  };
+}
+
 // ==========================================================================
 window.registerKandevPlugin("kandev-provider-usage", {
   initialize: function (registry, host) {
     registry.registerComponent("chat-top-bar", makeTopBarStatus(host));
+    registry.registerComponent("plugin-settings", makeSettingsStatus(host));
   },
 });
