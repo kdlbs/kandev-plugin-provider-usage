@@ -530,6 +530,49 @@ func TestOverviewPillProviders(t *testing.T) {
 	}
 }
 
+func TestOverviewStatusBarMode(t *testing.T) {
+	cases := []struct {
+		name string
+		mode any
+		want string
+	}{
+		{name: "defaults off", want: "off"},
+		{name: "percentage is opt in", mode: "percentage", want: "percentage"},
+		{name: "meter is opt in", mode: "meter", want: "meter"},
+		{name: "both is opt in", mode: "both", want: "both"},
+		{name: "mode is normalized", mode: " BOTH ", want: "both"},
+		{name: "unknown value stays off", mode: "unexpected", want: "off"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := codexbarConfig(map[string]any{"codexbar_providers": "claude"})
+			if c.mode != nil {
+				cfg["display_status_bar_mode"] = c.mode
+			}
+			p := newTestPlugin(t, cfg, nil, perProviderRunner(nil))
+
+			resp, err := p.HandleWebhook(context.Background(), webhookGet(webhookKeyOverview, ""))
+			require.NoError(t, err)
+			var report map[string]any
+			require.NoError(t, json.Unmarshal(resp.Body, &report))
+			require.Equal(t, c.want, report["status_bar_mode"])
+		})
+	}
+}
+
+func TestProvidersStatusBarMode(t *testing.T) {
+	p := newTestPlugin(t, codexbarConfig(map[string]any{
+		"codexbar_providers":      "claude",
+		"display_status_bar_mode": "both",
+	}), nil, perProviderRunner(nil))
+
+	resp, err := p.HandleWebhook(context.Background(), webhookGet(webhookKeyProviders, ""))
+	require.NoError(t, err)
+	var report map[string]any
+	require.NoError(t, json.Unmarshal(resp.Body, &report))
+	require.Equal(t, "both", report["status_bar_mode"])
+}
+
 func TestPollOnceDedupsWithinMaxAge(t *testing.T) {
 	var calls int32
 	cfg := codexbarConfig(map[string]any{"codexbar_providers": "claude"})

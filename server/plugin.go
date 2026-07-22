@@ -38,6 +38,7 @@ const (
 	configKeyWarnThreshold = "display_threshold_warn"
 	configKeyHighThreshold = "display_threshold_high"
 	configKeyPillProviders = "display_pill_providers"
+	configKeyStatusBarMode = "display_status_bar_mode"
 
 	configKeyAugmentToken    = "augment_api_token"
 	configKeyAugmentEmail    = "augment_email"
@@ -58,6 +59,11 @@ const (
 	// providersAll is the config sentinel that opts into codexbar's full
 	// ~60-provider sweep (slow; most are web-only and error on this host).
 	providersAll = "all"
+
+	statusBarModeOff        = "off"
+	statusBarModePercentage = "percentage"
+	statusBarModeMeter      = "meter"
+	statusBarModeBoth       = "both"
 )
 
 // defaultProviders is the curated set the Settings page queries when the
@@ -69,9 +75,9 @@ var defaultProviders = []string{
 	"claude", "codex", "gemini", "grok", "copilot", "cursor", "opencode", "amp",
 }
 
-// plugin implements pluginsdk.Plugin (via UnimplementedPlugin). Its three
+// plugin implements pluginsdk.Plugin (via UnimplementedPlugin). Its four
 // webhooks are relayed by kandev from
-// GET /api/plugins/kandev-provider-usage/webhooks/{status,providers,session}
+// GET /api/plugins/kandev-provider-usage/webhooks/{status,providers,session,overview}
 // over gRPC; the plugin's UI bundle is the only intended caller.
 //
 // A background poller (started once the Host is injected) refreshes a single
@@ -256,6 +262,9 @@ type AllProvidersReport struct {
 	Codexbar      InstallStatus `json:"codexbar"`
 	WarnThreshold float64       `json:"warn_threshold"`
 	HighThreshold float64       `json:"high_threshold"`
+	// StatusBarMode controls the optional global status contribution. It lives in
+	// the warm snapshot so every UI surface applies the same operator choice.
+	StatusBarMode string `json:"status_bar_mode"`
 	// PollMinutes is the background refresh interval, echoed so the UI can show
 	// "auto-refreshes every N min".
 	PollMinutes float64         `json:"poll_minutes"`
@@ -354,6 +363,7 @@ func (p *plugin) collectProviders(ctx context.Context) *AllProvidersReport {
 		GeneratedAt:   p.now().UTC().Format(time.RFC3339),
 		WarnThreshold: warn,
 		HighThreshold: high,
+		StatusBarMode: p.configuredStatusBarMode(ctx),
 		PollMinutes:   p.pollInterval(ctx).Minutes(),
 		Providers:     []ProviderUsage{},
 		Unavailable:   []ProviderError{},
@@ -673,6 +683,22 @@ func (p *plugin) configuredThresholds(ctx context.Context) (warn, high float64) 
 		high = warn
 	}
 	return warn, high
+}
+
+// configuredStatusBarMode defaults global chrome off. The session top-bar
+// contribution remains available independently of this setting.
+func (p *plugin) configuredStatusBarMode(ctx context.Context) string {
+	mode, _ := p.config(ctx)[configKeyStatusBarMode].(string)
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case statusBarModePercentage:
+		return statusBarModePercentage
+	case statusBarModeMeter:
+		return statusBarModeMeter
+	case statusBarModeBoth:
+		return statusBarModeBoth
+	default:
+		return statusBarModeOff
+	}
 }
 
 // positiveFloatOr coerces a JSON config value (numbers arrive as float64) to a

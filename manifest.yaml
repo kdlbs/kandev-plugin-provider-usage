@@ -1,6 +1,6 @@
 id: "kandev-provider-usage"
 api_version: 1
-version: "0.2.0"
+version: "0.2.6"
 display_name: "Provider Usage"
 description: "Subscription utilization for your agent providers — how much of each rate-limit window (5-hour / weekly / monthly) is used, with reset times. Hover the gauge in the session top bar to cycle through every provider, starting with the current session's. Data comes from the codexbar CLI (plus Augment's Analytics API)."
 author: "kandev"
@@ -103,6 +103,16 @@ config_schema:
         Providers shown in the top-bar pill (icon + %), comma-separated. Tokens:
         "current" (this session's provider), "all", or explicit ids. Empty =
         current only.
+    display_status_bar_mode:
+      type: string
+      enum: ["off", "percentage", "meter", "both"]
+      default: "off"
+      title: "Display · Global status bar"
+      description: >-
+        Status-bar presentation. "off" keeps provider usage in the session
+        top bar only; "percentage" shows the provider percentage; "meter" shows
+        the usage meter without a percentage; "both" shows meter and percentage.
+        Enabled modes also add readable rows to the phone Status drawer.
     display_threshold_warn:
       type: number
       default: 75

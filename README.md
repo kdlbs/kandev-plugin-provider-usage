@@ -2,10 +2,11 @@
 
 A [kandev](https://github.com/kdlbs/kandev) plugin that shows **subscription
 utilization** for your agent providers — how much of each rate-limit window
-(5-hour / weekly / monthly …) is used, with reset times — right in the session
-top bar. Data comes from the [codexbar](https://github.com/steipete/codexbar)
-CLI (covers ~60 providers: Claude, Codex/OpenAI, Gemini, Copilot, Cursor,
-Grok, …) plus Augment's own Analytics API.
+(5-hour / weekly / monthly …) is used, with reset times — in the session top
+bar and, when enabled, Kandev's global status bar. Data comes from the
+[codexbar](https://github.com/steipete/codexbar) CLI (covers ~60 providers:
+Claude, Codex/OpenAI, Gemini, Copilot, Cursor, Grok, …) plus Augment's own
+Analytics API.
 
 ## Screenshots
 
@@ -32,11 +33,18 @@ manifest's `config_schema` and grouped by source:
 
 ## What it does
 
-- **One surface**: a component in the `chat-top-bar` plugin slot (kandev ≥
-  [#1827](https://github.com/kdlbs/kandev/pull/1827)) — a pill showing the
-  providers you configure (icon + %), each real brand mark rendered
+- **Session top bar (default)**: a component in the `chat-top-bar` plugin slot
+  (kandev ≥ [#1827](https://github.com/kdlbs/kandev/pull/1827)) — a pill
+  showing the providers you configure (icon + %), each real brand mark rendered
   monochrome. Hover to open a panel that cycles through every provider (tabs,
   hover or click to switch), opening on the one behind the current session.
+- **Global status display (opt-in)**: `display_status_bar_mode` chooses `off`
+  (default), `percentage`, `meter`, or `both`. The contribution in
+  `app-status-bar-right` renders the selected compact presentation plus reset
+  context; hover opens the same full provider panel as the session top-bar
+  pill. It adapts to the host's 24 px desktop/tablet bar and its phone Status
+  drawer. It is global provider/account usage only; session IDs only help
+  resolve `current`.
 - Each provider's panel shows its rate-limit windows as thin bars (calm indigo
   normally, warming to amber/coral only when high — never a hard red), a
   reset countdown, plan/source badges, and codexbar's pace summary
@@ -82,6 +90,7 @@ Settings → Plugins → Provider Usage (generated from the manifest
 | `codexbar_poll_minutes`     | Background refresh interval (default 5, minimum 1).                                                          |
 | `codexbar_providers`        | Comma-separated provider ids to poll. Empty = curated local-credential set; `"all"` = full sweep (slower).  |
 | `display_pill_providers`    | Providers shown in the top-bar pill, comma-separated. Tokens: `current`, `all`, or explicit ids. Empty = current session's provider only. |
+| `display_status_bar_mode`   | `off` (default) keeps usage in the session top bar only. `percentage` adds icon + percentage to global status; `meter` adds icon + meter without percentage; `both` adds meter + percentage. Enabled modes also appear in the phone Status drawer. Requires a Kandev host with app-status-bar slots. |
 | `display_threshold_warn`    | A window at/above this % turns amber (default 75).                                                            |
 | `display_threshold_high`    | A window at/above this % turns red/coral (default 90).                                                        |
 
@@ -104,7 +113,8 @@ renders inline via the host's `plugin-settings` slot.
   snapshot; webhooks serve that snapshot instantly.
 - `ui/bundle.js` — hand-written, no-build ES module using the shared host React
   instance and `host.ui` components, plus inlined real brand-mark SVGs
-  (monochrome). It only renders the backend payload.
+  (monochrome). It registers the compatibility chat top-bar and opt-in global
+  status-right components, and only renders backend payloads.
 
 ## Develop
 
@@ -112,7 +122,7 @@ Requires a sibling checkout of the kandev monorepo at `../kandev` (see the
 `replace` directive in `go.mod`).
 
 ```sh
-make test           # go test ./server/... (codexbar/Augment calls are injected — no network needed)
+make test           # Go + UI-bundle tests (codexbar/Augment calls are injected — no network needed)
 make package-host   # tarball for this machine only (fast iteration)
 make package         # tarball for all 5 supported platforms
 ```
@@ -120,7 +130,7 @@ make package         # tarball for all 5 supported platforms
 Install the tarball via Settings → Plugins → Install plugin (upload), or:
 
 ```sh
-curl -F package=@kandev-provider-usage-0.2.0.tar.gz \
+curl -F package=@kandev-provider-usage-0.2.6.tar.gz \
   http://localhost:8080/api/plugins/install
 ```
 
