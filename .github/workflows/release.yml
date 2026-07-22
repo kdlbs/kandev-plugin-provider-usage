@@ -44,7 +44,7 @@ jobs:
         run: |
           test -z "$(gofmt -l ./server)" || { echo "gofmt needed:"; gofmt -l ./server; exit 1; }
           go vet ./server/...
-          go test ./server/...
+          make test
 
       - name: Package (all platforms)
         working-directory: plugin

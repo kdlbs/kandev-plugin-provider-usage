@@ -1,7 +1,7 @@
 .PHONY: build test fmt vet package package-host clean
 
 BIN := bin/kandev-provider-usage
-VERSION := 0.2.0
+VERSION := 0.2.6
 STAGE := .build/stage
 PKG_OUT := kandev-provider-usage-$(VERSION).tar.gz
 
@@ -13,6 +13,8 @@ build:
 
 test:
 	go test ./server/...
+	node --test test/bundle.test.mjs
+	node --check ui/bundle.js
 
 fmt:
 	gofmt -l .
