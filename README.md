@@ -10,14 +10,15 @@ Analytics API.
 
 ## Screenshots
 
-A pill in the session top bar (`chat-top-bar` slot) shows the providers you
-pick, each as an icon + %:
+A pill in the session top bar (`chat-top-bar` slot) shows the selected provider
+as an icon + %:
 
 ![Top-bar pill](https://raw.githubusercontent.com/kdlbs/kandev-plugin-provider-usage/0cbed6cfb38b0e642a26158392b71f44170e686d/topbar-pill.png)
 
-Hover it to open a panel that cycles through every provider — tabs across the
-top, starting with the one behind the **current session** — with rate-limit
-windows as bars, reset countdowns, and pace:
+Hover it to open a panel that cycles through every provider. Hover or click a
+tab to select it; the pill updates immediately and that selection persists
+across app/browser restarts. If it is unavailable, the panel falls back to the
+current session's provider, then the first available provider.
 
 ![Provider panel — Claude](https://raw.githubusercontent.com/kdlbs/kandev-plugin-provider-usage/0cbed6cfb38b0e642a26158392b71f44170e686d/panel-claude.png)
 
@@ -34,10 +35,10 @@ manifest's `config_schema` and grouped by source:
 ## What it does
 
 - **Session top bar (default)**: a component in the `chat-top-bar` plugin slot
-  (kandev ≥ [#1827](https://github.com/kdlbs/kandev/pull/1827)) — a pill
-  showing the providers you configure (icon + %), each real brand mark rendered
-  monochrome. Hover to open a panel that cycles through every provider (tabs,
-  hover or click to switch), opening on the one behind the current session.
+  (kandev ≥ [#1827](https://github.com/kdlbs/kandev/pull/1827)) — a pill for
+  your selected provider (icon + %), each real brand mark rendered monochrome.
+  Hover to open a panel that cycles through every provider; hover or click to
+  switch, and the selected tab is remembered locally.
 - **Global status display (opt-in)**: `display_status_bar_mode` chooses `off`
   (default), `percentage`, `meter`, or `both`. The contribution in
   `app-status-bar-right` renders the selected compact presentation plus reset
@@ -89,7 +90,7 @@ Settings → Plugins → Provider Usage (generated from the manifest
 | `codexbar_command`          | Explicit codexbar command. Empty = auto-detect / auto-download.                                             |
 | `codexbar_poll_minutes`     | Background refresh interval (default 5, minimum 1).                                                          |
 | `codexbar_providers`        | Comma-separated provider ids to poll. Empty = curated local-credential set; `"all"` = full sweep (slower).  |
-| `display_pill_providers`    | Providers shown in the top-bar pill, comma-separated. Tokens: `current`, `all`, or explicit ids. Empty = current session's provider only. |
+| `display_pill_providers`    | Providers included in the optional global status display, comma-separated. Tokens: `current`, `all`, or explicit ids. Empty = current session's provider only. The session top-bar pill instead follows the locally remembered tab selection. |
 | `display_status_bar_mode`   | `off` (default) keeps usage in the session top bar only. `percentage` adds icon + percentage to global status; `meter` adds icon + meter without percentage; `both` adds meter + percentage. Enabled modes also appear in the phone Status drawer. Requires a Kandev host with app-status-bar slots. |
 | `display_threshold_warn`    | A window at/above this % turns amber (default 75).                                                            |
 | `display_threshold_high`    | A window at/above this % turns red/coral (default 90).                                                        |

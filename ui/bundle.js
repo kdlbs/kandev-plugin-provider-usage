@@ -3,8 +3,8 @@
 // Hand-written, NO-BUILD plain-JS ES module (shared host React via host.jsx —
 // never bundles its own React). Registers three components:
 //   • "chat-top-bar" — a gauge in the session top bar that, on hover, opens a
-//     panel cycling through every provider's subscription utilization, starting
-//     with the provider that backs the current session.
+//     panel cycling through every provider's subscription utilization. The last
+//     provider selected in that panel is kept as a client-side preference.
 //   • "app-status-bar-right" — an opt-in percentage, meter, or combined usage
 //     display adapting to desktop/tablet status and the phone Status drawer.
 //   • "plugin-settings" — an integration-status card on the plugin's own
@@ -303,6 +303,58 @@ function providerShort(id) {
   return providerLabel(id).split(" / ")[0];
 }
 
+// The session top-bar is a personal, client-side view. Keep its last selected
+// provider separate from the server's display_pill_providers configuration,
+// which is still used by the optional global status display.
+var TOP_BAR_PROVIDER_PREFERENCE_KEY = "kandev-provider-usage.top-bar-provider";
+
+function topBarPreferenceStorage(storage) {
+  if (storage) return storage;
+  try {
+    return window.localStorage || null;
+  } catch (_err) {
+    // Browser privacy modes can deny localStorage; selection still works for
+    // the current component lifetime in that case.
+    return null;
+  }
+}
+
+function readTopBarProviderPreference(storage) {
+  var store = topBarPreferenceStorage(storage);
+  if (!store || !store.getItem) return "";
+  try {
+    return String(store.getItem(TOP_BAR_PROVIDER_PREFERENCE_KEY) || "");
+  } catch (_err) {
+    return "";
+  }
+}
+
+function saveTopBarProviderPreference(provider, storage) {
+  var store = topBarPreferenceStorage(storage);
+  if (!store || !store.setItem || !provider) return;
+  try {
+    store.setItem(TOP_BAR_PROVIDER_PREFERENCE_KEY, String(provider));
+  } catch (_err) {
+    // Keep the live selection even if persisting it is unavailable.
+  }
+}
+
+// topBarSelectedProvider resolves the client preference against the latest
+// overview without overwriting it. This lets a temporarily absent saved
+// provider return on a later refresh, while a panel always has a useful tab.
+function topBarSelectedProvider(providers, current, saved) {
+  var list = providers || [];
+  return providerByName(list, saved) || providerByName(list, current) || list[0] || null;
+}
+
+function providerIndex(providers, provider) {
+  var list = providers || [];
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].provider === provider) return i;
+  }
+  return -1;
+}
+
 // ---- one provider's panel (name + plan + updated, then window bars) --------
 function providerPanel(host, p, warn, high, generatedAt, reload, isCurrent) {
   var h = host.jsx;
@@ -417,7 +469,9 @@ function reorderProviders(providers, current) {
 }
 
 // ---- the panel body (tabs + selected provider) ----------------------------
-function panelBody(host, state, index, setIndex, reload) {
+// topBarSelection switches from the status popover's transient numeric index
+// to the top bar's persistent provider-id preference.
+function panelBody(host, state, index, setIndex, reload, topBarSelection) {
   var h = host.jsx;
   var ui = host.ui;
   var wrap = function (body) {
@@ -431,7 +485,7 @@ function panelBody(host, state, index, setIndex, reload) {
   var d = state.data;
   if (!d) return wrap(h("div", { style: { fontSize: "12px", opacity: 0.7 } }, "Hover to load provider usage"));
 
-  var providers = reorderProviders(d.providers, d.current_provider);
+  var providers = topBarSelection ? (d.providers || []) : reorderProviders(d.providers, d.current_provider);
   if (!providers.length) {
     var msg =
       d.codexbar && d.codexbar.installed === false
@@ -440,13 +494,20 @@ function panelBody(host, state, index, setIndex, reload) {
     return wrap(h("div", { style: { fontSize: "12px", opacity: 0.75, lineHeight: 1.4 } }, msg));
   }
 
-  var i = Math.min(index, providers.length - 1);
+  var selected = topBarSelection ? topBarSelectedProvider(providers, d.current_provider, index) : null;
+  var i = topBarSelection ? providerIndex(providers, selected && selected.provider) : Math.min(index, providers.length - 1);
   var p = providers[i];
+  var select = topBarSelection
+    ? function (selectedIndex) {
+        var provider = providers[selectedIndex];
+        if (provider) setIndex(provider.provider);
+      }
+    : setIndex;
   return wrap(
     h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "12px" } },
-      providers.length > 1 ? tabStrip(host, providers, i, d.current_provider, setIndex) : null,
+      providers.length > 1 ? tabStrip(host, providers, i, d.current_provider, select) : null,
       providerPanel(host, p, d.warn_threshold, d.high_threshold, d.generated_at, reload, d.current_provider && p.provider === d.current_provider),
     ),
   );
@@ -477,9 +538,9 @@ function makeTopBarStatus(host) {
     var stateHook = React.useState({ loading: false, data: null, error: null });
     var state = stateHook[0];
     var setState = stateHook[1];
-    var indexHook = React.useState(0);
-    var index = indexHook[0];
-    var setIndex = indexHook[1];
+    var selectedProviderHook = React.useState(function () { return readTopBarProviderPreference(); });
+    var selectedProvider = selectedProviderHook[0];
+    var setSelectedProvider = selectedProviderHook[1];
     var openHook = React.useState(false);
     var open = openHook[0];
     var setOpen = openHook[1];
@@ -511,7 +572,6 @@ function makeTopBarStatus(host) {
         .then(function (r) { return r.json(); })
         .then(function (data) {
           setState({ loading: false, data: data, error: null });
-          if (!opts.silent) setIndex(0);
         })
         .catch(function (err) {
           if (opts.silent) return; // keep the last good render on a transient poll failure
@@ -547,9 +607,16 @@ function makeTopBarStatus(host) {
     function openNow() { cancelClose(); reposition(); setOpen(true); load(false); }
     function scheduleClose() { cancelClose(); closeTimer.current = setTimeout(function () { setOpen(false); }, 260); }
 
-    // Inline: the configured pill providers as [icon %] segments, once loaded.
+    function selectProvider(provider) {
+      setSelectedProvider(provider);
+      saveTopBarProviderPreference(provider);
+    }
+
+    // The top-bar pill mirrors the user's selected provider. The configured
+    // pill list continues to drive the separate optional global status bar.
     var d = state.data;
-    var pill = pillContent(host, d);
+    var selected = topBarSelectedProvider(d && d.providers, d && d.current_provider, selectedProvider);
+    var pill = pillContent(host, d, selected && selected.provider);
 
     return h(
       "div",
@@ -579,7 +646,7 @@ function makeTopBarStatus(host) {
             h(
               ui.Card,
               { style: { padding: "13px 14px", boxShadow: "0 10px 28px rgba(15,20,40,0.20)" } },
-              panelBody(host, state, index, setIndex, function () { load(true); }),
+              panelBody(host, state, selectedProvider, selectProvider, function () { load(true); }, true),
             ),
           )
         : null,
@@ -606,11 +673,12 @@ function statusMeterProviders(data) {
   return out;
 }
 
-// pillContent renders the configured pill providers as [icon %] segments with a
-// thin separator between them. Returns null until data is loaded / no providers.
-function pillContent(host, d) {
+// pillContent renders configured pill providers for callers that do not supply
+// a selectedProvider. The session top-bar passes one, so its pill always
+// mirrors the user's saved selection instead.
+function pillContent(host, d, selectedProvider) {
   var h = host.jsx;
-  var ids = (d && d.pill_providers) || [];
+  var ids = selectedProvider ? [selectedProvider] : (d && d.pill_providers) || [];
   var segs = [];
   ids.forEach(function (id) {
     var pu = providerByName(d.providers, id);
