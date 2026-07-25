@@ -26,7 +26,11 @@ function statusMeterHelpers() {
       " statusMeterDetail: typeof statusMeterDetail === 'function' ? statusMeterDetail : null," +
       " statusMeterBarItem: typeof statusMeterBarItem === 'function' ? statusMeterBarItem : null," +
       " providerIcon: typeof providerIcon === 'function' ? providerIcon : null," +
-      " tabStrip: typeof tabStrip === 'function' ? tabStrip : null" +
+      " tabStrip: typeof tabStrip === 'function' ? tabStrip : null," +
+      " readTopBarProviderPreference: typeof readTopBarProviderPreference === 'function' ? readTopBarProviderPreference : null," +
+      " saveTopBarProviderPreference: typeof saveTopBarProviderPreference === 'function' ? saveTopBarProviderPreference : null," +
+      " topBarSelectedProvider: typeof topBarSelectedProvider === 'function' ? topBarSelectedProvider : null," +
+      " pillContent: typeof pillContent === 'function' ? pillContent : null" +
       " };",
     sandbox,
   );
@@ -191,6 +195,49 @@ test("renders provider brand icons at full foreground brightness", () => {
   assert.equal(icon.props.style.color, "var(--foreground)");
   assert.equal(icon.props.style.opacity, 1);
   assert.equal(inactiveProviderTab.props.style.opacity, 1);
+});
+
+test("top-bar provider preference persists and falls back to current then first available", () => {
+  const { readTopBarProviderPreference, saveTopBarProviderPreference, topBarSelectedProvider } = statusMeterHelpers();
+  const storage = new Map();
+  const localStorage = {
+    getItem(key) {
+      return storage.has(key) ? storage.get(key) : null;
+    },
+    setItem(key, value) {
+      storage.set(key, value);
+    },
+  };
+  const providers = [{ provider: "claude" }, { provider: "grok" }];
+
+  assert.equal(typeof readTopBarProviderPreference, "function");
+  assert.equal(typeof saveTopBarProviderPreference, "function");
+  assert.equal(typeof topBarSelectedProvider, "function");
+  assert.equal(readTopBarProviderPreference(localStorage), "");
+  saveTopBarProviderPreference("grok", localStorage);
+  assert.equal(readTopBarProviderPreference(localStorage), "grok");
+  assert.equal(topBarSelectedProvider(providers, "claude", "grok").provider, "grok");
+  assert.equal(topBarSelectedProvider(providers, "claude", "missing").provider, "claude");
+  assert.equal(topBarSelectedProvider(providers, "missing", "missing").provider, "claude");
+});
+
+test("top-bar pill immediately renders the user-selected provider", () => {
+  const { pillContent } = statusMeterHelpers();
+  const pill = pillContent(
+    { jsx: element },
+    {
+      pill_providers: ["claude"],
+      providers: [
+        { provider: "claude", windows: [{ utilization_pct: 17 }] },
+        { provider: "grok", windows: [{ utilization_pct: 61 }] },
+      ],
+    },
+    "grok",
+  );
+
+  assert.match(renderedText(pill), /61%/);
+  assert.doesNotMatch(renderedText(pill), /17%/);
+  assert.equal(pill.children[0][0].props.title, "Grok · 61% used");
 });
 
 test("uses matching type geometry for percentage and reset countdown", () => {
