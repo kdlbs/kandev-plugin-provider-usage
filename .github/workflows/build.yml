@@ -1,0 +1,44 @@
+name: Build
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Build plugin packages
+    runs-on: ubuntu-latest
+    steps:
+      # The plugin's local kandev SDK replacement expects this sibling layout.
+      - name: Checkout plugin
+        uses: actions/checkout@v4
+        with:
+          path: plugin
+
+      - name: Checkout kandev SDK (../kandev)
+        uses: actions/checkout@v4
+        with:
+          repository: kdlbs/kandev
+          path: kandev
+          sparse-checkout: apps/backend
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: plugin/go.mod
+          cache-dependency-path: plugin/go.sum
+
+      - name: Build host binary
+        working-directory: plugin
+        run: make build
+
+      - name: Package all supported platforms
+        working-directory: plugin
+        run: make package
