@@ -1,0 +1,171 @@
+name: prepare release
+
+# Maintainer-only release preparation workflow.
+#
+# Run this from GitHub Actions on main. It computes the next SemVer version,
+# commits release metadata and CHANGELOG.md directly to main, tags that commit,
+# and invokes the reusable release build. A dry run writes nothing.
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump"
+        required: true
+        type: choice
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
+      dry_run:
+        description: "Calculate the release version without creating a PR"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Prepare release commit
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    permissions:
+      contents: write
+    steps:
+      - name: Require main
+        env:
+          CURRENT_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          test "$CURRENT_REF" = "refs/heads/main" || {
+            echo "Run release preparation from main, not $CURRENT_REF." >&2
+            exit 1
+          }
+
+      - name: Check out main and release tags
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute next release version
+        id: version
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+          CURRENT_VERSION="$(sed -nE 's/^version: "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' manifest.yaml)"
+          MAKE_VERSION="$(sed -nE 's/^VERSION := ([0-9]+\.[0-9]+\.[0-9]+)$/\1/p' Makefile)"
+          test -n "$CURRENT_VERSION" || { echo "manifest.yaml has no SemVer version." >&2; exit 1; }
+          test "$CURRENT_VERSION" = "$MAKE_VERSION" || {
+            echo "manifest.yaml ($CURRENT_VERSION) and Makefile ($MAKE_VERSION) disagree." >&2
+            exit 1
+          }
+
+          LATEST_TAG="$(git tag --list 'v*' | awk '/^v[0-9]+\.[0-9]+\.[0-9]+$/' | sort -V | tail -n 1)"
+          BASELINE="$(CURRENT_VERSION="$CURRENT_VERSION" LATEST_TAG="$LATEST_TAG" python3 - <<'PY'
+          import os
+
+          current = tuple(map(int, os.environ["CURRENT_VERSION"].split(".")))
+          latest = os.environ["LATEST_TAG"].removeprefix("v")
+          tagged = tuple(map(int, latest.split("."))) if latest else (0, 0, 0)
+          print(".".join(map(str, max(current, tagged))))
+          PY
+          )"
+
+          IFS=. read -r MAJOR MINOR PATCH <<<"$BASELINE"
+          case "$BUMP" in
+            patch) NEXT="$MAJOR.$MINOR.$((PATCH + 1))" ;;
+            minor) NEXT="$MAJOR.$((MINOR + 1)).0" ;;
+            major) NEXT="$((MAJOR + 1)).0.0" ;;
+            *) echo "Unsupported version bump: $BUMP" >&2; exit 1 ;;
+          esac
+          TAG="v$NEXT"
+
+          ! git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null || {
+            echo "Tag already exists locally: $TAG" >&2
+            exit 1
+          }
+          ! git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null || {
+            echo "Tag already exists on origin: $TAG" >&2
+            exit 1
+          }
+
+          echo "Current version: $CURRENT_VERSION"
+          echo "Latest release tag: ${LATEST_TAG:-none}"
+          echo "Next version: $NEXT"
+          echo "version=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "previous_tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Report dry run
+        if: ${{ inputs.dry_run }}
+        run: echo "Would commit and tag ${{ steps.version.outputs.tag }} for ${{ steps.version.outputs.version }}."
+
+      - name: Update release metadata and changelog
+        if: ${{ !inputs.dry_run }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          PREVIOUS_TAG: ${{ steps.version.outputs.previous_tag }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const { execFileSync } = require("node:child_process");
+          const { existsSync, readFileSync, writeFileSync } = require("node:fs");
+
+          const version = process.env.VERSION;
+          const previousTag = process.env.PREVIOUS_TAG;
+          const replaceExactlyOne = (path, pattern, replacement) => {
+            const source = readFileSync(path, "utf8");
+            const matches = source.match(pattern) || [];
+            if (matches.length !== 1) throw new Error(`${path}: expected exactly one version to update`);
+            writeFileSync(path, source.replace(pattern, replacement));
+          };
+
+          replaceExactlyOne("manifest.yaml", /^version: "[^"]+"$/m, `version: "${version}"`);
+          replaceExactlyOne("Makefile", /^VERSION := [^\n]+$/m, `VERSION := ${version}`);
+          replaceExactlyOne(
+            "README.md",
+            /kandev-provider-usage-\d+\.\d+\.\d+\.tar\.gz/,
+            `kandev-provider-usage-${version}.tar.gz`,
+          );
+
+          const range = previousTag ? `${previousTag}..HEAD` : "HEAD";
+          const changes = execFileSync("git", ["log", "--no-merges", "--format=- %s (%h)", range], {
+            encoding: "utf8",
+          }).trim() || "- Initial release";
+          const date = new Date().toISOString().slice(0, 10);
+          const section = `## [${version}] - ${date}\n\n### Changed\n\n${changes}\n`;
+          const existing = existsSync("CHANGELOG.md") ? readFileSync("CHANGELOG.md", "utf8") : "# Changelog\n";
+          const changelog = existing.startsWith("# Changelog\n")
+            ? `# Changelog\n\n${section}\n${existing.slice("# Changelog\n".length).replace(/^\n+/, "")}`
+            : `# Changelog\n\n${section}\n${existing}`;
+          writeFileSync("CHANGELOG.md", changelog);
+          NODE
+
+      - name: Commit and tag release metadata
+        if: ${{ !inputs.dry_run }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add manifest.yaml Makefile README.md CHANGELOG.md
+          git commit -m "release: $VERSION"
+          git push origin HEAD:main
+          git tag -a "$TAG" -m "Release $VERSION"
+          git push origin "$TAG"
+
+  release:
+    name: Build and publish release
+    needs: prepare
+    if: ${{ !inputs.dry_run }}
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}
+    permissions:
+      contents: write
