@@ -137,9 +137,8 @@ curl -F package=@kandev-provider-usage-0.2.6.tar.gz \
 
 ## Release
 
-In **Actions → prepare release**, run the workflow from `main` and choose a
+In **Actions → release**, run the workflow from `main` and choose a
 patch, minor, or major bump. It commits the version update and generated
-`CHANGELOG.md` directly to `main`, tags that commit as `vX.Y.Z`, then invokes
-the release build. The build verifies (`fmt`/`vet`/`test`), cross-compiles all
-platforms, and publishes the tarball + `checksums.txt` as a GitHub Release,
-which the kandev marketplace resolves.
+`CHANGELOG.md` directly to `main`, tags that commit as `vX.Y.Z`, then verifies
+(`fmt`/`vet`/`test`), cross-compiles all platforms, and publishes the tarball +
+`checksums.txt` as a GitHub Release, which the kandev marketplace resolves.
