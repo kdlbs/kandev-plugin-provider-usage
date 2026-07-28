@@ -138,9 +138,8 @@ curl -F package=@kandev-provider-usage-0.2.6.tar.gz \
 ## Release
 
 In **Actions → prepare release**, run the workflow from `main` and choose a
-patch, minor, or major bump. It creates a reviewable `release/vX.Y.Z` pull
-request that updates the plugin version and generates `CHANGELOG.md` from the
-commits since the previous tag. Merge that PR, then tag its merge commit as
-`vX.Y.Z`. `.github/workflows/release.yml` verifies (`fmt`/`vet`/`test`),
-cross-compiles all platforms, and publishes the tarball + `checksums.txt` as a
-GitHub Release, which the kandev marketplace resolves.
+patch, minor, or major bump. It commits the version update and generated
+`CHANGELOG.md` directly to `main`, tags that commit as `vX.Y.Z`, then invokes
+the release build. The build verifies (`fmt`/`vet`/`test`), cross-compiles all
+platforms, and publishes the tarball + `checksums.txt` as a GitHub Release,
+which the kandev marketplace resolves.

@@ -13,7 +13,7 @@ build:
 
 test:
 	go test ./server/...
-	node --test test/bundle.test.mjs test/release-preparation.test.mjs
+	node --test test/bundle.test.mjs
 	node --check ui/bundle.js
 
 fmt:

@@ -3,9 +3,8 @@ name: prepare release
 # Maintainer-only release preparation workflow.
 #
 # Run this from GitHub Actions on main. It computes the next SemVer version,
-# updates release metadata and CHANGELOG.md, then opens a reviewable release PR.
-# Merging that PR does not publish anything: create and push the matching v* tag
-# afterwards to trigger .github/workflows/release.yml.
+# commits release metadata and CHANGELOG.md directly to main, tags that commit,
+# and invokes the reusable release build. A dry run writes nothing.
 on:
   workflow_dispatch:
     inputs:
@@ -29,11 +28,12 @@ permissions:
 
 jobs:
   prepare:
-    name: Prepare release pull request
+    name: Prepare release commit
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
     permissions:
       contents: write
-      pull-requests: write
     steps:
       - name: Require main
         env:
@@ -102,7 +102,7 @@ jobs:
 
       - name: Report dry run
         if: ${{ inputs.dry_run }}
-        run: echo "Would create release/${{ steps.version.outputs.tag }} for ${{ steps.version.outputs.version }}."
+        run: echo "Would commit and tag ${{ steps.version.outputs.tag }} for ${{ steps.version.outputs.version }}."
 
       - name: Update release metadata and changelog
         if: ${{ !inputs.dry_run }}
@@ -145,28 +145,27 @@ jobs:
           writeFileSync("CHANGELOG.md", changelog);
           NODE
 
-      - name: Create release preparation pull request
+      - name: Commit and tag release metadata
         if: ${{ !inputs.dry_run }}
         env:
-          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
           TAG: ${{ steps.version.outputs.tag }}
         run: |
           set -euo pipefail
-          BRANCH="release/$TAG"
-          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null; then
-            echo "Release branch already exists: $BRANCH" >&2
-            exit 1
-          fi
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git switch -c "$BRANCH"
           git add manifest.yaml Makefile README.md CHANGELOG.md
           git commit -m "release: $VERSION"
-          git push -u origin "$BRANCH"
-          gh pr create \
-            --base main \
-            --head "$BRANCH" \
-            --title "release: $VERSION" \
-            --body "Automated release preparation for \`$TAG\`. Review the version bump and changelog, then merge before creating the release tag."
+          git push origin HEAD:main
+          git tag -a "$TAG" -m "Release $VERSION"
+          git push origin "$TAG"
+
+  release:
+    name: Build and publish release
+    needs: prepare
+    if: ${{ !inputs.dry_run }}
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}
+    permissions:
+      contents: write
