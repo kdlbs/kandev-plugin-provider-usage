@@ -15,8 +15,8 @@ as an icon + %:
 
 ![Top-bar pill](https://raw.githubusercontent.com/kdlbs/kandev-plugin-provider-usage/0cbed6cfb38b0e642a26158392b71f44170e686d/topbar-pill.png)
 
-Hover it to open a panel that cycles through every provider. Hover or click a
-tab to select it; the pill updates immediately and that selection persists
+Hover it to open a panel that cycles through every provider. Click a tab to
+select it; the pill updates immediately and that selection persists
 across app/browser restarts. If it is unavailable, the panel falls back to the
 current session's provider, then the first available provider.
 
@@ -37,8 +37,8 @@ manifest's `config_schema` and grouped by source:
 - **Session top bar (default)**: a component in the `chat-top-bar` plugin slot
   (kandev ≥ [#1827](https://github.com/kdlbs/kandev/pull/1827)) — a pill for
   your selected provider (icon + %), each real brand mark rendered monochrome.
-  Hover to open a panel that cycles through every provider; hover or click to
-  switch, and the selected tab is remembered locally.
+  Hover to open a panel that cycles through every provider; click to switch,
+  and the selected tab is remembered locally.
 - **Global status display (opt-in)**: `display_status_bar_mode` chooses `off`
   (default), `percentage`, `meter`, or `both`. The contribution in
   `app-status-bar-right` renders the selected compact presentation plus reset

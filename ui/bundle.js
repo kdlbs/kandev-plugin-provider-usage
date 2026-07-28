@@ -426,7 +426,6 @@ function tabStrip(host, providers, active, current, onSelect) {
           type: "button",
           title: providerLabel(p.provider) + (isCurrent ? " · this session" : ""),
           onClick: function () { onSelect(i); },
-          onMouseEnter: function () { onSelect(i); },
           style: {
             display: "inline-flex",
             alignItems: "center",

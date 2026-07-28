@@ -179,8 +179,9 @@ test("status contribution retries startup discovery then keeps config live", () 
   assert.equal(statusRefreshDelay({ status_bar_mode: "both" }), 60_000);
 });
 
-test("renders provider brand icons at full foreground brightness", () => {
+test("renders provider brand icons at full foreground brightness and selects tabs only on click", () => {
   const { providerIcon, tabStrip } = statusMeterHelpers();
+  const selected = [];
 
   const icon = providerIcon(element, "codex", 13, "Codex / OpenAI");
   const tabs = tabStrip(
@@ -188,13 +189,16 @@ test("renders provider brand icons at full foreground brightness", () => {
     [{ provider: "claude" }, { provider: "codex" }],
     0,
     "claude",
-    () => {},
+    (index) => selected.push(index),
   );
   const inactiveProviderTab = tabs.children[0][1];
 
   assert.equal(icon.props.style.color, "var(--foreground)");
   assert.equal(icon.props.style.opacity, 1);
   assert.equal(inactiveProviderTab.props.style.opacity, 1);
+  assert.equal(inactiveProviderTab.props.onMouseEnter, undefined);
+  inactiveProviderTab.props.onClick();
+  assert.deepEqual(selected, [1]);
 });
 
 test("top-bar provider preference persists and falls back to current then first available", () => {
