@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.8] - 2026-08-01
+
+### Changed
+
+- fix: align provider usage topbar control (#10) (a2e20b6)
+
+
 ## [0.2.7] - 2026-07-28
 
 ### Changed
