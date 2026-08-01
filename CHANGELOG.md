@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.9] - 2026-08-01
+
+### Changed
+
+- chore(security): bump x/net & x/text, pin CI actions to commit SHA (#11) (ab2d5e6)
+
+
 ## [0.2.8] - 2026-08-01
 
 ### Changed
