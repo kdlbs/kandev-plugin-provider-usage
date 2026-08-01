@@ -21,6 +21,26 @@
 // re-read hits the cached snapshot (no `refresh=1`), so it's cheap.
 var AUTO_REFRESH_MS = 60 * 1000;
 var DISCOVERY_RETRY_MS = 2 * 1000;
+var TOPBAR_STYLE_ID = "kandev-provider-usage-topbar-style";
+var TOPBAR_CSS =
+  "#provider-usage-topbar{height:28px;min-height:28px}" +
+  "#provider-usage-topbar[data-provider-usage-mode=icon]{width:28px}" +
+  "@media (max-width:639px){#provider-usage-topbar{height:44px;min-height:44px}" +
+  "#provider-usage-topbar[data-provider-usage-mode=icon]{width:44px}}";
+
+function injectTopbarStyles() {
+  if (typeof document === "undefined" || document.getElementById(TOPBAR_STYLE_ID)) return;
+  var style = document.createElement("style");
+  style.id = TOPBAR_STYLE_ID;
+  style.textContent = TOPBAR_CSS;
+  document.head.appendChild(style);
+}
+
+function removeTopbarStyles() {
+  if (typeof document === "undefined") return;
+  var style = document.getElementById(TOPBAR_STYLE_ID);
+  if (style && style.parentNode) style.parentNode.removeChild(style);
+}
 
 function statusRefreshDelay(data) {
   return data ? AUTO_REFRESH_MS : DISCOVERY_RETRY_MS;
@@ -625,6 +645,7 @@ function makeTopBarStatus(host) {
         {
           id: "provider-usage-topbar",
           type: "button",
+          "data-provider-usage-mode": pill ? "pill" : "icon",
           variant: "outline",
           size: "sm",
           className: (pill ? "h-6 gap-1.5 px-2 " : "h-6 w-6 px-0 ") + "rounded-md text-xs font-medium text-muted-foreground hover:text-foreground",
@@ -1315,8 +1336,12 @@ function makeSettingsStatus(host) {
 // ==========================================================================
 window.registerKandevPlugin("kandev-provider-usage", {
   initialize: function (registry, host) {
+    injectTopbarStyles();
     registry.registerComponent("chat-top-bar", makeTopBarStatus(host));
     registry.registerComponent("app-status-bar-right", makeAppStatusBarUsage(host));
     registry.registerComponent("plugin-settings", makeSettingsStatus(host));
+  },
+  destroy: function () {
+    removeTopbarStyles();
   },
 });

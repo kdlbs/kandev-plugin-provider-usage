@@ -59,6 +59,39 @@ function registeredComponentSlots() {
   return slots;
 }
 
+function topbarStyleText() {
+  let plugin;
+  const styles = [];
+  const document = {
+    head: {
+      appendChild(style) {
+        styles.push(style);
+      },
+    },
+    createElement() {
+      return { id: "", textContent: "", parentNode: null };
+    },
+    getElementById() {
+      return null;
+    },
+  };
+  const sandbox = {
+    Date,
+    Math,
+    String,
+    isFinite,
+    document,
+    window: {
+      registerKandevPlugin(_id, definition) {
+        plugin = definition;
+      },
+    },
+  };
+  vm.runInNewContext(bundleSource(), sandbox);
+  plugin.initialize({ registerComponent() {} }, {});
+  return styles.map((style) => style.textContent).join("\n");
+}
+
 test("status-bar display defaults off and accepts every explicit presentation", () => {
   const { statusBarMode, statusBarParts } = statusMeterHelpers();
 
@@ -114,6 +147,16 @@ test("registers provider usage in the global status bar right slot only", () => 
 
   assert.ok(slots.includes("app-status-bar-right"));
   assert.ok(!slots.includes("app-status-bar-left"));
+});
+
+test("chat topbar control uses desktop and phone geometry", () => {
+  const styles = topbarStyleText();
+
+  assert.match(styles, /#provider-usage-topbar[^}]*height:28px/);
+  assert.match(
+    styles,
+    /@media \(max-width:639px\)\{#provider-usage-topbar[^}]*height:44px/,
+  );
 });
 
 function element(type, props, ...children) {
