@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1] - 2026-08-07
+
+### Changed
+
+- fix: use real opencode brand mark for provider icon (#13) (54966f0)
+
+
 ## [0.3.0] - 2026-08-07
 
 ### Changed
