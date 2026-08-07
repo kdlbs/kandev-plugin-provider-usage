@@ -28,6 +28,15 @@ const sampleCodexEntry = `{"provider":"codex","source":"oauth","version":"0.136.
 const sampleCursorError = `{"source":"auto","provider":"cursor",
   "error":{"kind":"provider","message":"No Cursor session found.","code":1}}`
 
+// sampleOpenCodeGoEntry mirrors codexbar's opencodego output: local-SQLite
+// source with a 5-hour primary window and an optional weekly window.
+const sampleOpenCodeGoEntry = `{"provider":"opencodego","source":"local","version":"",
+  "pace":{"primary":{"summary":"52% in reserve | Lasts until reset","stage":"farBehind"}},
+  "usage":{"primary":{"resetsAt":"2026-08-07T22:00:00Z","usedPercent":34,"windowMinutes":300,"resetDescription":"Resets 10pm"},
+    "secondary":{"resetsAt":"2026-08-13T00:00:00Z","usedPercent":58,"windowMinutes":10080,"resetDescription":"Resets Aug 13"},
+    "tertiary":null,
+    "identity":{"providerID":"opencodego","planName":"Zen"},"updatedAt":"2026-08-07T18:00:00Z"}}`
+
 func TestToProviderUsage_ClaudeWindows(t *testing.T) {
 	entries, err := parseCodexbarUsage([]byte(sampleClaudeJSON))
 	require.NoError(t, err)
@@ -64,6 +73,23 @@ func TestToProviderUsage_CodexPlanFromLoginMethod(t *testing.T) {
 	require.Equal(t, "free", u.Plan, "plan falls back to loginMethod")
 	require.Len(t, u.Windows, 1)
 	require.Equal(t, "monthly", u.Windows[0].Label, "43200 minutes -> monthly")
+}
+
+func TestToProviderUsage_OpenCodeGoWindows(t *testing.T) {
+	entries, err := parseCodexbarUsage([]byte("[" + sampleOpenCodeGoEntry + "]"))
+	require.NoError(t, err)
+	u := entries[0].toProviderUsage(time.Unix(0, 0))
+	require.NotNil(t, u)
+	require.Equal(t, "opencodego", u.Provider)
+	require.Equal(t, "local", u.Source)
+	require.Equal(t, "Zen", u.Plan, "plan from identity")
+	require.Len(t, u.Windows, 2)
+	require.Equal(t, "5-hour", u.Windows[0].Label)
+	require.InDelta(t, 34.0, u.Windows[0].UtilizationPct, 1e-9)
+	require.Equal(t, "weekly", u.Windows[1].Label)
+	require.InDelta(t, 58.0, u.Windows[1].UtilizationPct, 1e-9)
+	require.NotNil(t, u.PacePrime)
+	require.Contains(t, u.PacePrime.Summary, "in reserve")
 }
 
 func TestToProviderUsage_NilForErrorEntry(t *testing.T) {
