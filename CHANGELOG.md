@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0] - 2026-08-07
+
+### Changed
+
+- feat: support opencode via codexbar opencodego provider (#12) (eaada7e)
+
+
 ## [0.2.9] - 2026-08-01
 
 ### Changed

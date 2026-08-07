@@ -1,7 +1,7 @@
 .PHONY: build test fmt vet package package-host clean
 
 BIN := bin/kandev-provider-usage
-VERSION := 0.2.9
+VERSION := 0.3.0
 STAGE := .build/stage
 PKG_OUT := kandev-provider-usage-$(VERSION).tar.gz
 
