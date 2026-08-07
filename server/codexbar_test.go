@@ -31,6 +31,8 @@ func TestProviderForSession(t *testing.T) {
 		{"copilot", pluginsdk.Session{AgentProfileName: "GitHub Copilot"}, "copilot"},
 		{"cursor", pluginsdk.Session{AgentDisplayName: "Cursor Agent"}, "cursor"},
 		{"grok", pluginsdk.Session{Model: "grok-4"}, "grok"},
+		{"opencode by profile", pluginsdk.Session{AgentProfileName: "OpenCode"}, "opencodego"},
+		{"opencodego by display", pluginsdk.Session{AgentDisplayName: "OpenCode Go"}, "opencodego"},
 		{"unknown", pluginsdk.Session{AgentDisplayName: "Mystery"}, ""},
 		{"empty", pluginsdk.Session{}, ""},
 	}

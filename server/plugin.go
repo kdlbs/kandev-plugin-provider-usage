@@ -72,7 +72,7 @@ const (
 // unlike codexbar's ~50 web-only providers, which the `all` sweep wastes time
 // probing. Each is still queried; unconfigured ones surface as unavailable.
 var defaultProviders = []string{
-	"claude", "codex", "gemini", "grok", "copilot", "cursor", "opencode", "amp",
+	"claude", "codex", "gemini", "grok", "copilot", "cursor", "opencodego", "amp",
 }
 
 // plugin implements pluginsdk.Plugin (via UnimplementedPlugin). Its four

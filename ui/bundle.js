@@ -81,7 +81,7 @@ var PROVIDER_LABELS = {
   copilot: "GitHub Copilot",
   cursor: "Cursor",
   grok: "Grok",
-  opencode: "OpenCode",
+  opencodego: "OpenCode",
   amp: "Amp",
   augment: "Augment",
 };
@@ -102,7 +102,7 @@ var PROVIDER_ICON = {
   copilot: { mono: "Co", bg: "#6e5494" },
   cursor: { mono: "Cu", bg: "#111827" },
   augment: { mono: "Au", bg: "#6152d9" },
-  opencode: { mono: "Oc", bg: "#f59e0b" },
+  opencodego: { mono: "Oc", bg: "#3b82f6" },
   amp: { mono: "Am", bg: "#8b5cf6" },
 };
 

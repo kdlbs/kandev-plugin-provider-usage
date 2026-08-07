@@ -166,7 +166,11 @@ var providerMatches = []providerMatch{
 	{"copilot", []string{"copilot"}},
 	{"cursor", []string{"cursor"}},
 	{"grok", []string{"grok", "xai"}},
-	{"opencode", []string{"opencode"}},
+	// codexbar splits opencode into two ids — `opencode` (web/browser cookies
+	// only) and `opencodego` (the Go CLI: local SQLite + optional web overlay).
+	// The plugin polls only opencodego (no cookies needed) and surfaces it as a
+	// single "OpenCode" provider; both spellings map to it.
+	{"opencodego", []string{"opencode", "opencodego"}},
 	{"augment", []string{"augment", "auggie"}},
 	{"amp", []string{"amp"}},
 }
