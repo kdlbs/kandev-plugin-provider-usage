@@ -244,6 +244,13 @@ test("renders provider brand icons at full foreground brightness and selects tab
   assert.deepEqual(selected, [1]);
 });
 
+test("renders the real opencode brand mark, not the monogram fallback", () => {
+  const { providerIcon } = statusMeterHelpers();
+  const icon = providerIcon(element, "opencodego", 13, "OpenCode");
+  assert.equal(icon.props.viewBox, "0 0 24 30", "uses the opencode logo canvas");
+  assert.match(icon.props.dangerouslySetInnerHTML.__html, /fill-rule="evenodd"/);
+});
+
 test("top-bar provider preference persists and falls back to current then first available", () => {
   const { readTopBarProviderPreference, saveTopBarProviderPreference, topBarSelectedProvider } = statusMeterHelpers();
   const storage = new Map();
