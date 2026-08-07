@@ -81,7 +81,7 @@ var PROVIDER_LABELS = {
   copilot: "GitHub Copilot",
   cursor: "Cursor",
   grok: "Grok",
-  opencode: "OpenCode",
+  opencodego: "OpenCode",
   amp: "Amp",
   augment: "Augment",
 };
@@ -102,7 +102,7 @@ var PROVIDER_ICON = {
   copilot: { mono: "Co", bg: "#6e5494" },
   cursor: { mono: "Cu", bg: "#111827" },
   augment: { mono: "Au", bg: "#6152d9" },
-  opencode: { mono: "Oc", bg: "#f59e0b" },
+  opencodego: { mono: "Oc", bg: "#3b82f6" },
   amp: { mono: "Am", bg: "#8b5cf6" },
 };
 
@@ -364,6 +364,9 @@ function saveTopBarProviderPreference(provider, storage) {
 // provider return on a later refresh, while a panel always has a useful tab.
 function topBarSelectedProvider(providers, current, saved) {
   var list = providers || [];
+  // Legacy alias: the saved id was `opencode` before the Go-CLI provider
+  // (opencodego) replaced it; keep honoring the stored selection.
+  if (saved === "opencode") saved = "opencodego";
   return providerByName(list, saved) || providerByName(list, current) || list[0] || null;
 }
 

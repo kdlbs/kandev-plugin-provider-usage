@@ -5,8 +5,8 @@ utilization** for your agent providers — how much of each rate-limit window
 (5-hour / weekly / monthly …) is used, with reset times — in the session top
 bar and, when enabled, Kandev's global status bar. Data comes from the
 [codexbar](https://github.com/steipete/codexbar) CLI (covers ~60 providers:
-Claude, Codex/OpenAI, Gemini, Copilot, Cursor, Grok, …) plus Augment's own
-Analytics API.
+Claude, Codex/OpenAI, Gemini, Copilot, Cursor, Grok, OpenCode, …) plus
+Augment's own Analytics API.
 
 ## Screenshots
 

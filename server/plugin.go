@@ -72,7 +72,7 @@ const (
 // unlike codexbar's ~50 web-only providers, which the `all` sweep wastes time
 // probing. Each is still queried; unconfigured ones surface as unavailable.
 var defaultProviders = []string{
-	"claude", "codex", "gemini", "grok", "copilot", "cursor", "opencode", "amp",
+	"claude", "codex", "gemini", "grok", "copilot", "cursor", "opencodego", "amp",
 }
 
 // plugin implements pluginsdk.Plugin (via UnimplementedPlugin). Its four
@@ -340,14 +340,28 @@ func (p *plugin) pillProviders(ctx context.Context, snap *AllProvidersReport, cu
 	return out
 }
 
-// configuredList parses a comma-separated, lowercased config string into tokens.
+// providerAliases canonicalizes legacy provider spellings onto the codexbar
+// provider the plugin polls today. `opencode` (codexbar's browser-cookie-only
+// id) was replaced by `opencodego` (the Go CLI's local SQLite), so an allowlist
+// or pill config saved before the switch keeps polling the right provider.
+var providerAliases = map[string]string{
+	"opencode": "opencodego",
+}
+
+// configuredList parses a comma-separated, lowercased config string into tokens,
+// canonicalizing legacy provider ids through providerAliases.
 func (p *plugin) configuredList(ctx context.Context, key string) []string {
 	raw, _ := p.config(ctx)[key].(string)
 	var out []string
 	for _, part := range strings.Split(raw, ",") {
-		if s := strings.ToLower(strings.TrimSpace(part)); s != "" {
-			out = append(out, s)
+		s := strings.ToLower(strings.TrimSpace(part))
+		if s == "" {
+			continue
 		}
+		if aliased, ok := providerAliases[s]; ok {
+			s = aliased
+		}
+		out = append(out, s)
 	}
 	return out
 }

@@ -246,6 +246,33 @@ func TestHandleWebhook_ProvidersDefaultSet(t *testing.T) {
 	require.NotEmpty(t, report.Unavailable)
 }
 
+// TestConfiguredProviders_AliasesLegacyOpenCode covers the upgrade path: an
+// allowlist saved as `opencode` (codexbar's old browser-cookie id) must keep
+// polling the opencodego provider the plugin now uses.
+func TestConfiguredProviders_AliasesLegacyOpenCode(t *testing.T) {
+	var calls int32
+	var polled []string
+	run := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if len(args) > 0 && args[len(args)-1] == "--version" {
+			return []byte("CodexBar 0.45.2\n"), nil
+		}
+		atomic.AddInt32(&calls, 1)
+		polled = append(polled, argValue(args, "--provider"))
+		return []byte("[]"), nil
+	}
+	cfg := codexbarConfig(map[string]any{"codexbar_providers": "opencode"})
+	p := newTestPlugin(t, cfg, nil, run)
+
+	resp, err := p.HandleWebhook(context.Background(), webhookGet(webhookKeyProviders, ""))
+	require.NoError(t, err)
+	require.Equal(t, int32(200), resp.Status)
+	require.GreaterOrEqual(t, calls, int32(1))
+	require.NotEmpty(t, polled)
+	for _, provider := range polled {
+		require.Equal(t, "opencodego", provider, "legacy opencode allowlist entry canonicalized to opencodego")
+	}
+}
+
 func TestHandleWebhook_ProvidersAllSweep(t *testing.T) {
 	var calls int32
 	cfg := codexbarConfig(map[string]any{"codexbar_providers": "all"})
@@ -506,20 +533,27 @@ func TestHandleWebhook_Overview(t *testing.T) {
 
 func TestOverviewPillProviders(t *testing.T) {
 	sessions := []pluginsdk.Session{session("kandev-sess", "Claude Code")}
+	byProvider := map[string][]byte{
+		"claude":     []byte("[" + sampleClaudeInner() + "]"),
+		"codex":      []byte("[" + sampleCodexEntry + "]"),
+		"opencodego": []byte("[" + sampleOpenCodeGoEntry + "]"),
+	}
 	cases := []struct {
-		name string
-		pill string
-		want []string
+		name      string
+		providers string
+		pill      string
+		want      []string
 	}{
-		{"default is current", "", []string{"claude"}},
-		{"current + explicit", "current, codex", []string{"claude", "codex"}},
-		{"all", "all", []string{"claude", "codex"}},
-		{"drops unavailable + dedupes", "codex, codex, gemini", []string{"codex"}},
+		{"default is current", "claude,codex", "", []string{"claude"}},
+		{"current + explicit", "claude,codex", "current, codex", []string{"claude", "codex"}},
+		{"all", "claude,codex", "all", []string{"claude", "codex"}},
+		{"drops unavailable + dedupes", "claude,codex", "codex, codex, gemini", []string{"codex"}},
+		{"legacy opencode aliases to opencodego", "opencodego", "opencode", []string{"opencodego"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			cfg := codexbarConfig(map[string]any{"codexbar_providers": "claude,codex", "display_pill_providers": c.pill})
-			p := newTestPlugin(t, cfg, sessions, perProviderRunner(nil))
+			cfg := codexbarConfig(map[string]any{"codexbar_providers": c.providers, "display_pill_providers": c.pill})
+			p := newTestPlugin(t, cfg, sessions, providerRunner(nil, byProvider))
 			resp, err := p.HandleWebhook(context.Background(),
 				webhookGet(webhookKeyOverview, "task_id=task-1&active=kandev-sess"))
 			require.NoError(t, err)
