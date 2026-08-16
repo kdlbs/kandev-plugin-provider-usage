@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -16,20 +17,28 @@ const (
 	sourceDownload = "download" // pinned per-platform binary downloaded + cached
 )
 
+// Failure stages, reported in InstallStatus.Stage so the UI can say whether the
+// plugin never got a command at all, or got one that didn't run.
+const (
+	stageResolve = "resolve" // no runnable command (unsupported platform, failed download, ...)
+	stageProbe   = "probe"   // a command exists, but `--version` failed
+)
+
 // resolvedCommand is the argv the plugin will run codexbar with, plus where that
 // argv came from. Err is set when resolution itself failed (unsupported platform
 // or a failed download); probeInstall/runUsage surface it as a degraded status.
+// CacheDir is the auto-download cache root, carried for the download source so a
+// failure hint can name the directory to clear.
 type resolvedCommand struct {
-	Argv   []string
-	Source string
-	Err    error
+	Argv     []string
+	Source   string
+	CacheDir string
+	Err      error
 }
 
-// commandDisplay renders the resolved argv for humans ("/usr/local/bin/codexbar").
+// commandDisplay renders the resolved argv for humans
+// ("/usr/local/bin/codexbar"), or "" when resolution never produced one.
 func commandDisplay(cmd resolvedCommand) string {
-	if len(cmd.Argv) == 0 {
-		return "codexbar"
-	}
 	return strings.Join(cmd.Argv, " ")
 }
 
@@ -41,31 +50,125 @@ type runner func(ctx context.Context, name string, args ...string) ([]byte, erro
 // version. Embedded in every payload so the UI can render setup guidance from
 // the same shape it always reads.
 type InstallStatus struct {
-	// Command is the resolved argv joined for display.
-	Command string `json:"command"`
+	// Command is the resolved argv joined for display, "" when resolution failed.
+	Command string `json:"command,omitempty"`
 	// Source is where the command came from: "settings", "path" or "download".
 	Source    string `json:"source"`
 	Installed bool   `json:"installed"`
 	Version   string `json:"version,omitempty"`
-	Error     string `json:"error,omitempty"`
+	// Error is the raw cause, verbatim (exit status + stderr, HTTP status, ...).
+	Error string `json:"error,omitempty"`
+	// Stage is where it broke: "resolve" or "probe". Empty when installed.
+	Stage string `json:"stage,omitempty"`
+	// Hint is the operator-facing next step for Error, rendered under it on the
+	// Settings card. Empty when the error speaks for itself.
+	Hint string `json:"hint,omitempty"`
 }
 
 // probeInstall checks the resolved command works by running `--version` and
-// parsing the version out of its output ("CodexBar 0.45.2").
+// parsing the version out of its output ("CodexBar 0.45.2"). A failure at either
+// stage is annotated with an actionable hint rather than left as a bare error.
 func probeInstall(ctx context.Context, cmd resolvedCommand, run runner) InstallStatus {
 	status := InstallStatus{Command: commandDisplay(cmd), Source: cmd.Source}
 	if cmd.Err != nil {
+		status.Stage = stageResolve
 		status.Error = cmd.Err.Error()
+		status.Hint = installHint(cmd, cmd.Err)
 		return status
 	}
 	out, err := run(ctx, cmd.Argv[0], append(argvTail(cmd), "--version")...)
 	if err != nil {
+		status.Stage = stageProbe
 		status.Error = err.Error()
+		status.Hint = installHint(cmd, err)
 		return status
 	}
 	status.Installed = true
 	status.Version = parseVersion(string(out))
 	return status
+}
+
+// settingName is how the codexbar command field is labelled in the Settings
+// form, so hints can point at the exact input to edit.
+const settingName = `"codexbar · CLI command"`
+
+// installHint turns a resolution or probe failure into the single next step the
+// operator can take. Download failures are classified by installError kind;
+// everything else is a command that exists but didn't run, which differs by
+// where that command came from.
+func installHint(cmd resolvedCommand, err error) string {
+	var ierr *installError
+	if errors.As(err, &ierr) {
+		return downloadHint(ierr)
+	}
+	switch cmd.Source {
+	case sourceSettings:
+		return fmt.Sprintf(
+			"kandev couldn't run %s, the command set in %s. Check that the path exists and is executable, "+
+				"or clear the field to let the plugin download codexbar itself.",
+			commandDisplay(cmd), settingName)
+	case sourcePath:
+		return fmt.Sprintf(
+			"%s was found on PATH but didn't answer `--version`. Set a full path to a working codexbar in %s, "+
+				"or remove the broken binary from PATH.",
+			commandDisplay(cmd), settingName)
+	case sourceDownload:
+		return fmt.Sprintf(
+			"The downloaded codexbar at %s didn't answer `--version` — it may be quarantined or truncated. "+
+				"Delete %s and re-check to download it again, or set your own codexbar path in %s.",
+			commandDisplay(cmd), cacheDirDisplay(cmd), settingName)
+	}
+	return ""
+}
+
+// downloadHint is the per-kind guidance for a failed auto-download.
+func downloadHint(err *installError) string {
+	switch err.Kind {
+	case installErrUnsupported:
+		return fmt.Sprintf(
+			"codexbar publishes macOS and Linux CLI builds only, so nothing can be downloaded here. "+
+				"Install codexbar yourself and set its full path in %s.", settingName)
+	case installErrDownload:
+		if errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Sprintf(
+				"The one-time download of codexbar v%s ran out of time and was discarded. It retries on the next "+
+					"refresh — press re-check. If this host can't reach github.com, install codexbar yourself and "+
+					"set its path in %s.", pinnedVersion, settingName)
+		}
+		return fmt.Sprintf(
+			"The one-time download of codexbar v%s from %s failed. Check this host's outbound access to "+
+				"github.com (proxy, firewall, air-gapped install), then press re-check — or install codexbar "+
+				"yourself and set its path in %s.", pinnedVersion, downloadTarget(err), settingName)
+	case installErrChecksum:
+		return fmt.Sprintf(
+			"The downloaded archive didn't match the SHA-256 pinned for codexbar v%s, so it was discarded "+
+				"instead of run. Press re-check to retry; if it keeps failing, install codexbar yourself and set "+
+				"its path in %s.", pinnedVersion, settingName)
+	case installErrUnpack:
+		return fmt.Sprintf(
+			"The download couldn't be unpacked into %s. Check that directory's permissions and free space, "+
+				"or set your own codexbar path in %s.", err.Path, settingName)
+	}
+	return ""
+}
+
+// downloadTarget names what the download hint should point at: the full asset
+// URL, unless the raw error already spells it out one line above — then just the
+// host, so the card doesn't print the same URL twice.
+func downloadTarget(err *installError) string {
+	if err.URL == "" || strings.Contains(err.Err.Error(), err.URL) {
+		return "github.com"
+	}
+	return err.URL
+}
+
+// cacheDirDisplay names the auto-download cache root, falling back to a generic
+// description when the command didn't come from the download path.
+func cacheDirDisplay(cmd resolvedCommand) string {
+	if cmd.CacheDir != "" {
+		return cmd.CacheDir
+	}
+	return "the plugin's codexbar cache"
 }
 
 // parseVersion extracts "0.45.2" from codexbar's `--version` output

@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
 	"net/url"
 	"os/exec"
@@ -115,7 +117,8 @@ var _ pluginsdk.Plugin = (*plugin)(nil)
 func newPlugin() *plugin {
 	return &plugin{
 		run: func(ctx context.Context, name string, args ...string) ([]byte, error) {
-			return exec.CommandContext(ctx, name, args...).Output()
+			out, err := exec.CommandContext(ctx, name, args...).Output()
+			return out, withStderr(err)
 		},
 		lookPath: exec.LookPath,
 		now:      time.Now,
@@ -229,9 +232,42 @@ func (p *plugin) resolveCommand(ctx context.Context) resolvedCommand {
 	}
 	bin, err := p.dl.ensure(ctx)
 	if err != nil {
-		return resolvedCommand{Source: sourceDownload, Err: err}
+		return resolvedCommand{Source: sourceDownload, CacheDir: p.dl.cacheDir, Err: err}
 	}
-	return resolvedCommand{Argv: []string{bin}, Source: sourceDownload}
+	return resolvedCommand{Argv: []string{bin}, Source: sourceDownload, CacheDir: p.dl.cacheDir}
+}
+
+// withStderr folds a failed command's stderr into its error, so a probe failure
+// reads "exit status 1: dyld: Library not loaded" on the Settings card instead
+// of a bare exit code. Only the first stderr line is kept — codexbar's failures
+// lead with the cause, and the rest is a stack trace the operator can't act on.
+func withStderr(err error) error {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return err
+	}
+	detail := firstLine(string(exitErr.Stderr))
+	if detail == "" {
+		return err
+	}
+	return fmt.Errorf("%w: %s", err, detail)
+}
+
+// firstLine returns the first non-blank line of s, truncated to a length that
+// still fits the Settings card.
+func firstLine(s string) string {
+	const maxLen = 200
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if len(line) > maxLen {
+			return line[:maxLen] + "…"
+		}
+		return line
+	}
+	return ""
 }
 
 // --- status webhook -----------------------------------------------------------
@@ -390,7 +426,8 @@ func (p *plugin) collectProviders(ctx context.Context) *AllProvidersReport {
 	cancelProbe()
 	report.Codexbar = status
 	if !status.Installed {
-		log.Printf("codexbar unavailable (status-only report): %s", status.Error)
+		log.Printf("codexbar unavailable at %s stage (status-only report): %s — %s",
+			status.Stage, status.Error, status.Hint)
 		return report
 	}
 

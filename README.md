@@ -76,6 +76,14 @@ the CLI in this order:
    (macOS and Linux only — codexbar has no Windows build, so set an explicit
    path there).
 
+When that fails, the plugin doesn't just go quiet: the **Integration status**
+card on the settings page shows which of those three paths was tried, the raw
+cause (including the failed command's first stderr line), and a hint naming the
+fix — no outbound access to github.com, a checksum mismatch, an unwritable
+cache directory, an unsupported platform, or a configured path that isn't
+executable. The download is retried on every refresh, so a transient failure
+clears itself on the next poll or on **re-check**.
+
 ## Settings
 
 Settings → Plugins → Provider Usage (generated from the manifest
@@ -99,9 +107,15 @@ Saving settings restarts the plugin, so changes take effect immediately; the
 panel also has a **Refresh** button for an on-demand update.
 
 Below the settings form, an **Integration status** card shows live health at a
-glance — whether the codexbar CLI resolved (with version + how it was found) and
-whether the Augment Analytics API is reachable — with a re-check button. It
-renders inline via the host's `plugin-settings` slot.
+glance — whether the codexbar CLI resolved (with version, how it was found, and
+the binary in use) and whether the Augment Analytics API is reachable — with a
+re-check button. It renders inline via the host's `plugin-settings` slot.
+
+When codexbar isn't working the card explains why: `missing` when no binary
+could be resolved (download blocked, unsupported platform, checksum mismatch),
+`not working` when one was found but wouldn't run. Both show the raw error plus
+the next step to take. The same reason also appears in the hover panel, so a
+blank pill explains itself without a trip to Settings.
 
 ## Layout
 

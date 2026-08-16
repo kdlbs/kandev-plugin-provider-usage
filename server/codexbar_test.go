@@ -117,4 +117,96 @@ func TestProbeInstall_ResolutionError(t *testing.T) {
 	status := probeInstall(context.Background(), cmd, nil)
 	require.False(t, status.Installed)
 	require.Contains(t, status.Error, "no prebuilt")
+	require.Equal(t, stageResolve, status.Stage)
+	require.Empty(t, status.Command, "resolution never produced a command to show")
+}
+
+// TestProbeInstall_ProbeErrorCarriesHint covers the common misconfiguration: a
+// configured command that doesn't run. The Settings card gets the raw error AND
+// the field to fix.
+func TestProbeInstall_ProbeErrorCarriesHint(t *testing.T) {
+	run := func(context.Context, string, ...string) ([]byte, error) {
+		return nil, errors.New("fork/exec /opt/codexbar: no such file or directory")
+	}
+	cmd := resolvedCommand{Argv: []string{"/opt/codexbar"}, Source: sourceSettings}
+	status := probeInstall(context.Background(), cmd, run)
+
+	require.False(t, status.Installed)
+	require.Equal(t, stageProbe, status.Stage)
+	require.Equal(t, "/opt/codexbar", status.Command)
+	require.Contains(t, status.Error, "no such file or directory")
+	require.Contains(t, status.Hint, "/opt/codexbar")
+	require.Contains(t, status.Hint, settingName, "names the setting to edit")
+}
+
+func TestInstallHint_ByDownloadFailure(t *testing.T) {
+	cmd := resolvedCommand{Source: sourceDownload, CacheDir: "/home/u/.config/kandev-provider-usage"}
+	cases := []struct {
+		name string
+		err  error
+		want []string
+	}{
+		{
+			"unsupported platform",
+			&installError{Kind: installErrUnsupported, Err: errors.New("no prebuilt CLI for windows-amd64")},
+			[]string{"macOS and Linux", settingName},
+		},
+		{
+			"download failed",
+			&installError{Kind: installErrDownload, URL: "https://example.test/cli.tar.gz", Err: errors.New("unexpected status 403")},
+			[]string{"https://example.test/cli.tar.gz", "github.com", pinnedVersion},
+		},
+		{
+			// The raw error already ends in the URL, so the hint says "github.com"
+			// instead of repeating it.
+			"download failure that already names the url",
+			&installError{
+				Kind: installErrDownload,
+				URL:  "https://example.test/cli.tar.gz",
+				Err:  errors.New("downloading codexbar: unexpected status 403 fetching https://example.test/cli.tar.gz"),
+			},
+			[]string{"from github.com failed"},
+		},
+		{
+			"download timed out",
+			&installError{Kind: installErrDownload, URL: "https://example.test/cli.tar.gz", Err: context.DeadlineExceeded},
+			[]string{"ran out of time", "re-check"},
+		},
+		{
+			"checksum mismatch",
+			&installError{Kind: installErrChecksum, Err: errors.New("codexbar checksum mismatch")},
+			[]string{"SHA-256", "discarded"},
+		},
+		{
+			"unpack failed",
+			&installError{Kind: installErrUnpack, Path: "/cache/codexbar/0.45.2", Err: errors.New("permission denied")},
+			[]string{"/cache/codexbar/0.45.2", "permissions"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			hint := installHint(cmd, c.err)
+			for _, want := range c.want {
+				require.Contains(t, hint, want)
+			}
+		})
+	}
+}
+
+// TestInstallHint_BySource covers a command that exists but didn't answer
+// `--version`: the fix differs by where the command came from.
+func TestInstallHint_BySource(t *testing.T) {
+	err := errors.New("exit status 1")
+
+	settings := installHint(resolvedCommand{Argv: []string{"/opt/cb"}, Source: sourceSettings}, err)
+	require.Contains(t, settings, "clear the field")
+
+	path := installHint(resolvedCommand{Argv: []string{"/usr/bin/codexbar"}, Source: sourcePath}, err)
+	require.Contains(t, path, "PATH")
+
+	download := installHint(
+		resolvedCommand{Argv: []string{"/cache/CodexBarCLI"}, Source: sourceDownload, CacheDir: "/cache"}, err)
+	require.Contains(t, download, "/cache")
+
+	require.Empty(t, installHint(resolvedCommand{Argv: []string{"cb"}}, err), "unknown source has nothing to add")
 }

@@ -41,6 +41,30 @@ var codexbarAssets = map[string]platformAsset{
 	"darwin-arm64": {"macos-arm64", "df83f412016bbb70c3011ae2c38e36fc211c39cae7e4dc7c655b6c968622e7bc"},
 }
 
+// installErrKind classifies why the auto-download path couldn't produce a
+// runnable codexbar. The Settings card pairs the raw error with a per-kind hint
+// (see installHint), so the operator sees what to do, not just what broke.
+type installErrKind string
+
+const (
+	installErrUnsupported installErrKind = "unsupported_platform" // no build for this GOOS/GOARCH
+	installErrDownload    installErrKind = "download"             // fetching the release asset failed
+	installErrChecksum    installErrKind = "checksum"             // asset didn't match the pinned SHA-256
+	installErrUnpack      installErrKind = "unpack"               // gunzip/untar/publish into the cache failed
+)
+
+// installError carries the classification plus the context the hint needs: the
+// release URL for download failures, the cache directory for unpack failures.
+type installError struct {
+	Kind installErrKind
+	URL  string
+	Path string
+	Err  error
+}
+
+func (e *installError) Error() string { return e.Err.Error() }
+func (e *installError) Unwrap() error { return e.Err }
+
 // codexbarURL is the GitHub release download URL for a platform suffix.
 func codexbarURL(suffix string) string {
 	return fmt.Sprintf(
@@ -91,9 +115,10 @@ func (d *downloader) binPath() string {
 func (d *downloader) ensure(ctx context.Context) (string, error) {
 	asset, ok := codexbarAssets[d.platform]
 	if !ok {
-		return "", fmt.Errorf(
-			"codexbar has no prebuilt CLI for %s — set a codexbar path in Settings > Plugins > Provider Usage",
-			d.platform)
+		return "", &installError{
+			Kind: installErrUnsupported,
+			Err:  fmt.Errorf("codexbar has no prebuilt CLI for %s", d.platform),
+		}
 	}
 	bin := d.binPath()
 	if isExecutableFile(bin) {
@@ -110,20 +135,28 @@ func (d *downloader) ensure(ctx context.Context) (string, error) {
 // just the binary) because codexbar reads its sibling VERSION file to report its
 // own version; the executable is the member named codexbarBinName.
 func (d *downloader) install(ctx context.Context, asset platformAsset, versionDir string) error {
-	body, err := d.fetch(ctx, codexbarURL(asset.suffix))
+	url := codexbarURL(asset.suffix)
+	body, err := d.fetch(ctx, url)
 	if err != nil {
-		return fmt.Errorf("downloading codexbar: %w", err)
+		return &installError{Kind: installErrDownload, URL: url, Err: fmt.Errorf("downloading codexbar: %w", err)}
 	}
 	defer body.Close()
 
 	raw, err := io.ReadAll(body)
 	if err != nil {
-		return fmt.Errorf("reading codexbar download: %w", err)
+		return &installError{Kind: installErrDownload, URL: url, Err: fmt.Errorf("reading codexbar download: %w", err)}
 	}
 	if got := sha256Hex(raw); got != asset.sha256 {
-		return fmt.Errorf("codexbar checksum mismatch: expected %s, got %s", asset.sha256, got)
+		return &installError{
+			Kind: installErrChecksum,
+			URL:  url,
+			Err:  fmt.Errorf("codexbar checksum mismatch: expected %s, got %s", asset.sha256, got),
+		}
 	}
-	return extractTarGz(raw, versionDir, codexbarBinName)
+	if err := extractTarGz(raw, versionDir, codexbarBinName); err != nil {
+		return &installError{Kind: installErrUnpack, URL: url, Path: versionDir, Err: err}
+	}
+	return nil
 }
 
 // extractTarGz gunzips + untars a codexbar tarball into destDir, flattening
