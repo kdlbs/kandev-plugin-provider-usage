@@ -492,6 +492,14 @@ function reorderProviders(providers, current) {
 // ---- the panel body (tabs + selected provider) ----------------------------
 // topBarSelection switches from the status popover's transient numeric index
 // to the top bar's persistent provider-id preference.
+// codexbarProblem condenses a failed codexbar install into one explanatory line
+// for the hover panel: the backend's hint when it produced one (it names the
+// fix), else the raw error. "" when codexbar is fine.
+function codexbarProblem(st) {
+  if (!st || st.installed !== false) return "";
+  return st.hint || st.error || "";
+}
+
 function panelBody(host, state, index, setIndex, reload, topBarSelection) {
   var h = host.jsx;
   var ui = host.ui;
@@ -508,11 +516,26 @@ function panelBody(host, state, index, setIndex, reload, topBarSelection) {
 
   var providers = topBarSelection ? (d.providers || []) : reorderProviders(d.providers, d.current_provider);
   if (!providers.length) {
-    var msg =
-      d.codexbar && d.codexbar.installed === false
-        ? "codexbar isn't available — set it in Settings → Plugins → Provider Usage."
-        : "No provider usage yet. Sign in to an agent CLI (Claude, Codex, …) on this machine.";
-    return wrap(h("div", { style: { fontSize: "12px", opacity: 0.75, lineHeight: 1.4 } }, msg));
+    var broken = d.codexbar && d.codexbar.installed === false;
+    var msg = broken
+      ? "codexbar isn't available — see Settings → Plugins → Provider Usage."
+      : "No provider usage yet. Sign in to an agent CLI (Claude, Codex, …) on this machine.";
+    return wrap(
+      h(
+        "div",
+        { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+        h("div", { style: { fontSize: "12px", opacity: 0.75, lineHeight: 1.4 } }, msg),
+        // The same reason the Settings card shows, so a hover explains itself
+        // without a trip to Settings.
+        broken && codexbarProblem(d.codexbar)
+          ? h(
+              "div",
+              { style: { fontSize: "11px", opacity: 0.6, lineHeight: 1.4 } },
+              codexbarProblem(d.codexbar),
+            )
+          : null,
+      ),
+    );
   }
 
   var selected = topBarSelection ? topBarSelectedProvider(providers, d.current_provider, index) : null;
@@ -1140,28 +1163,44 @@ function statusBadge(h, ok, label) {
   );
 }
 
-// statusRow: icon · (title + mono detail) · badge. opts = { ok, title, detail, badge }.
-function statusRow(h, opts) {
+// detailLine: one mono line of machine detail (a resolved path, a raw error).
+function detailLine(h, text, key) {
   return h(
     "div",
-    { style: { display: "flex", alignItems: "center", gap: "11px" } },
-    statusIcon(h, opts.ok),
+    {
+      key: key,
+      style: {
+        fontSize: "11.5px",
+        opacity: 0.55,
+        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+        wordBreak: "break-word",
+      },
+    },
+    text,
+  );
+}
+
+// statusRow: icon · (title + mono detail lines + prose hint) · badge.
+// opts = { ok, title, detail (string | string[]), hint, badge }. The hint is the
+// operator's next step, so it stays prose — not monospace, not truncated.
+function statusRow(h, opts) {
+  var details = opts.detail == null ? [] : [].concat(opts.detail).filter(Boolean);
+  return h(
+    "div",
+    { style: { display: "flex", alignItems: "flex-start", gap: "11px" } },
+    h("div", { style: { paddingTop: "1px" } }, statusIcon(h, opts.ok)),
     h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0, flex: "1 1 auto" } },
       h("div", { style: { fontSize: "13.5px", fontWeight: 700 } }, opts.title),
-      opts.detail
+      details.map(function (text, i) {
+        return detailLine(h, text, "d" + i);
+      }),
+      opts.hint
         ? h(
             "div",
-            {
-              style: {
-                fontSize: "11.5px",
-                opacity: 0.55,
-                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                wordBreak: "break-word",
-              },
-            },
-            opts.detail,
+            { style: { fontSize: "11.5px", opacity: 0.78, lineHeight: 1.45, marginTop: "3px", wordBreak: "break-word" } },
+            opts.hint,
           )
         : null,
     ),
@@ -1169,20 +1208,35 @@ function statusRow(h, opts) {
   );
 }
 
-// codexbarRow: ✅ "working" with version + how it resolved, else ❌ "missing" with the probe error.
+// sourceText: "source: PATH" — how the CLI resolved (or tried to).
+function sourceText(st) {
+  return "source: " + (SOURCE_LABEL[st.source] || st.source || "unknown");
+}
+
+// codexbarRow: ✅ "working" with version, how it resolved, and the resolved path;
+// otherwise ❌ with the raw failure AND the backend's hint for fixing it. The
+// badge separates "never got a binary" (missing) from "got one that won't run"
+// (not working), because those need different fixes.
 function codexbarRow(h, st) {
   st = st || {};
   if (st.installed) {
     var bits = [];
     if (st.version) bits.push("v" + st.version);
-    bits.push("source: " + (SOURCE_LABEL[st.source] || st.source || "unknown"));
-    return statusRow(h, { ok: true, title: "codexbar CLI", detail: bits.join(" · "), badge: "working" });
+    bits.push(sourceText(st));
+    return statusRow(h, {
+      ok: true,
+      title: "codexbar CLI",
+      detail: [bits.join(" · "), st.command],
+      badge: "working",
+    });
   }
+  var error = st.error || "codexbar could not be resolved";
   return statusRow(h, {
     ok: false,
     title: "codexbar CLI",
-    detail: st.error || "not found — set a path in the settings above",
-    badge: "missing",
+    detail: [st.command ? sourceText(st) + " · " + st.command : sourceText(st), error],
+    hint: st.hint || "Set a path to the codexbar CLI in the settings above.",
+    badge: st.stage === "probe" ? "not working" : "missing",
   });
 }
 

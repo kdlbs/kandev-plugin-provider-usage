@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os/exec"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -605,6 +607,43 @@ func TestProvidersStatusBarMode(t *testing.T) {
 	var report map[string]any
 	require.NoError(t, json.Unmarshal(resp.Body, &report))
 	require.Equal(t, "both", report["status_bar_mode"])
+}
+
+// TestHandleWebhook_ProvidersReportsInstallFailure covers what the Settings card
+// renders when the auto-download can't run: the raw error, the stage it failed
+// at, and the hint that names the operator's next step.
+func TestHandleWebhook_ProvidersReportsInstallFailure(t *testing.T) {
+	p := newTestPlugin(t, map[string]any{}, nil, nil) // empty config + no PATH -> download path
+	p.dl.platform = "windows-amd64"                   // no prebuilt CLI exists
+
+	resp, err := p.HandleWebhook(context.Background(), webhookGet(webhookKeyProviders, ""))
+	require.NoError(t, err)
+	require.Equal(t, int32(200), resp.Status)
+
+	var report AllProvidersReport
+	require.NoError(t, json.Unmarshal(resp.Body, &report))
+	require.False(t, report.Codexbar.Installed)
+	require.Equal(t, sourceDownload, report.Codexbar.Source)
+	require.Equal(t, stageResolve, report.Codexbar.Stage)
+	require.Contains(t, report.Codexbar.Error, "no prebuilt CLI for windows-amd64")
+	require.Contains(t, report.Codexbar.Hint, "macOS and Linux")
+}
+
+// TestWithStderr keeps a failing codexbar's reason visible: exec.Cmd.Output()
+// reports only "exit status N", while its stderr holds the actual cause.
+func TestWithStderr(t *testing.T) {
+	_, err := exec.Command("sh", "-c", "echo 'config file is corrupt' >&2; exit 3").Output()
+	require.Error(t, err)
+	require.Equal(t, "exit status 3: config file is corrupt", withStderr(err).Error())
+
+	plain := errors.New("fork/exec /opt/codexbar: no such file or directory")
+	require.Equal(t, plain, withStderr(plain), "non-exit errors pass through unchanged")
+}
+
+func TestFirstLine(t *testing.T) {
+	require.Equal(t, "cause", firstLine("\n\n  cause  \nstack frame\n"))
+	require.Equal(t, "", firstLine("   \n"))
+	require.Equal(t, strings.Repeat("x", 200)+"…", firstLine(strings.Repeat("x", 400)))
 }
 
 func TestPollOnceDedupsWithinMaxAge(t *testing.T) {

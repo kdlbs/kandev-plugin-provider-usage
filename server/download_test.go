@@ -105,6 +105,7 @@ func TestDownloaderEnsure_ChecksumMismatch(t *testing.T) {
 	_, err := d.ensure(context.Background())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "checksum mismatch")
+	require.Equal(t, installErrChecksum, installErrKindOf(t, err))
 }
 
 func TestDownloaderEnsure_UnsupportedPlatform(t *testing.T) {
@@ -112,6 +113,16 @@ func TestDownloaderEnsure_UnsupportedPlatform(t *testing.T) {
 	_, err := d.ensure(context.Background())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no prebuilt")
+	require.Equal(t, installErrUnsupported, installErrKindOf(t, err))
+}
+
+// installErrKindOf asserts err is a classified install failure and returns its
+// kind — the classification is what turns a raw error into a Settings hint.
+func installErrKindOf(t *testing.T, err error) installErrKind {
+	t.Helper()
+	var ierr *installError
+	require.ErrorAs(t, err, &ierr)
+	return ierr.Kind
 }
 
 func TestDownloaderEnsure_FetchError(t *testing.T) {
@@ -125,4 +136,9 @@ func TestDownloaderEnsure_FetchError(t *testing.T) {
 	_, err := d.ensure(context.Background())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "network down")
+
+	var ierr *installError
+	require.ErrorAs(t, err, &ierr)
+	require.Equal(t, installErrDownload, ierr.Kind)
+	require.Contains(t, ierr.URL, "CodexBarCLI-v"+pinnedVersion, "hint names the asset that failed")
 }

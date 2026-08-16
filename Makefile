@@ -5,6 +5,13 @@ VERSION := 0.3.1
 STAGE := .build/stage
 PKG_OUT := kandev-provider-usage-$(VERSION).tar.gz
 
+## plugin-pack lives in the kandev monorepo. Run it from THAT module (go -C) so
+## its own dependencies resolve against the SDK's go.sum: running it from here
+## would need go.sum entries for packages this plugin never imports, which
+## `go mod tidy` (enforced in CI) then strips again.
+SDK := ../kandev/apps/backend
+PACK := go -C $(SDK) run ./cmd/plugin-pack
+
 ## Build the plugin binary for the host platform (development use; the
 ## installed-plugin path always goes through `make package`/`package-host`).
 build:
@@ -38,7 +45,7 @@ package:
 	GOOS=darwin  GOARCH=amd64 go build -o $(STAGE)/server/plugin-darwin-amd64      ./server
 	GOOS=darwin  GOARCH=arm64 go build -o $(STAGE)/server/plugin-darwin-arm64      ./server
 	GOOS=windows GOARCH=amd64 go build -o $(STAGE)/server/plugin-windows-amd64.exe ./server
-	go run github.com/kandev/kandev/cmd/plugin-pack -dir $(STAGE) -out $(PKG_OUT)
+	$(PACK) -dir $(abspath $(STAGE)) -out $(abspath $(PKG_OUT))
 	rm -rf $(STAGE)
 	@echo "Wrote $(PKG_OUT)"
 
@@ -50,7 +57,7 @@ package-host:
 	cp manifest.yaml $(STAGE)/manifest.yaml
 	cp -r ui $(STAGE)/ui
 	go build -o $(STAGE)/server/plugin-$$(go env GOOS)-$$(go env GOARCH)$$(go env GOEXE) ./server
-	go run github.com/kandev/kandev/cmd/plugin-pack -dir $(STAGE) -out $(PKG_OUT) -platform-only
+	$(PACK) -dir $(abspath $(STAGE)) -out $(abspath $(PKG_OUT)) -platform-only
 	rm -rf $(STAGE)
 	@echo "Wrote $(PKG_OUT)"
 

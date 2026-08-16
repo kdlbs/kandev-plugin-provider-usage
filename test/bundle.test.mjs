@@ -30,7 +30,9 @@ function statusMeterHelpers() {
       " readTopBarProviderPreference: typeof readTopBarProviderPreference === 'function' ? readTopBarProviderPreference : null," +
       " saveTopBarProviderPreference: typeof saveTopBarProviderPreference === 'function' ? saveTopBarProviderPreference : null," +
       " topBarSelectedProvider: typeof topBarSelectedProvider === 'function' ? topBarSelectedProvider : null," +
-      " pillContent: typeof pillContent === 'function' ? pillContent : null" +
+      " pillContent: typeof pillContent === 'function' ? pillContent : null," +
+      " codexbarRow: typeof codexbarRow === 'function' ? codexbarRow : null," +
+      " codexbarProblem: typeof codexbarProblem === 'function' ? codexbarProblem : null" +
       " };",
     sandbox,
   );
@@ -315,4 +317,58 @@ test("uses matching type geometry for percentage and reset countdown", () => {
   assert.equal(reset.props.style.alignItems, "center");
   assert.equal(reset.props.style.alignSelf, "stretch");
   assert.equal(reset.props.style.lineHeight, 1);
+});
+
+test("settings status card explains a failed codexbar install, not just its error", () => {
+  const { codexbarRow } = statusMeterHelpers();
+  const row = codexbarRow(element, {
+    installed: false,
+    source: "download",
+    stage: "resolve",
+    error: "downloading codexbar: unexpected status 403 fetching https://github.com/…",
+    hint: "The one-time download of codexbar v0.45.2 failed. Check this host's outbound access to github.com.",
+  });
+  const text = renderedText(row);
+
+  assert.match(text, /source: download/, "shows which resolution path was tried");
+  assert.match(text, /unexpected status 403/, "keeps the raw cause");
+  assert.match(text, /outbound access to github\.com/, "adds the operator's next step");
+  assert.match(text, /missing/, "resolution failure reads as missing");
+});
+
+test("settings status card separates a broken binary from a missing one", () => {
+  const { codexbarRow } = statusMeterHelpers();
+  const probeFailure = codexbarRow(element, {
+    installed: false,
+    source: "settings",
+    stage: "probe",
+    command: "/opt/codexbar",
+    error: "exit status 1: config file is corrupt",
+    hint: 'Check that the path exists and is executable, or clear the field in "codexbar · CLI command".',
+  });
+  const working = codexbarRow(element, {
+    installed: true,
+    source: "path",
+    version: "0.45.2",
+    command: "/usr/local/bin/codexbar",
+  });
+
+  const failureText = renderedText(probeFailure);
+  assert.match(failureText, /not working/, "a binary that exists but fails is not 'missing'");
+  assert.match(failureText, /\/opt\/codexbar/, "names the command it ran");
+  assert.match(failureText, /config file is corrupt/, "surfaces stderr from the failed probe");
+
+  const workingText = renderedText(working);
+  assert.match(workingText, /v0\.45\.2 · source: PATH/);
+  assert.match(workingText, /\/usr\/local\/bin\/codexbar/, "shows which binary is in use");
+  assert.doesNotMatch(workingText, /missing|not working/);
+});
+
+test("hover panel repeats the codexbar failure reason", () => {
+  const { codexbarProblem } = statusMeterHelpers();
+
+  assert.equal(codexbarProblem({ installed: true, version: "0.45.2" }), "");
+  assert.equal(codexbarProblem(null), "");
+  assert.equal(codexbarProblem({ installed: false, error: "raw", hint: "do this" }), "do this");
+  assert.equal(codexbarProblem({ installed: false, error: "raw" }), "raw", "falls back to the raw error");
 });
