@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0] - 2026-08-16
+
+### Changed
+
+- feat: explain codexbar install failures in plugin settings (#14) (2cba93f)
+
+
 ## [0.3.1] - 2026-08-07
 
 ### Changed
