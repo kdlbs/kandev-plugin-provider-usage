@@ -35,8 +35,8 @@ type platformAsset struct {
 // macOS and Linux CLI builds only — Windows has no entry and degrades to
 // "configure a codexbar path" guidance.
 var codexbarAssets = map[string]platformAsset{
-	"linux-amd64":  {"linux-x86_64", "f5ca9e5bbe511493902bd8fd7d2c409c9b4800259967284a05a73627156a5f2e"},
-	"linux-arm64":  {"linux-aarch64", "d5635c9e5b7524ecd4aa91d0de30a3c18f3c9d1fcaa3920187a6d6c7f3b8bbc0"},
+	"linux-amd64":  {"linux-musl-x86_64", "7397da556d6400e9c069953c89e6bdbbc41b82d1ddd8b1fe6af576bef9f98487"},
+	"linux-arm64":  {"linux-musl-aarch64", "b209659765da51aaad471ffa194d808e85ca8f59c4b68be86e9045ea5c10bae0"},
 	"darwin-amd64": {"macos-x86_64", "fb433b69f91b1459a6be2f1c630814eb71f84e9e63ed28bce0e56a3bea6feb5a"},
 	"darwin-arm64": {"macos-arm64", "df83f412016bbb70c3011ae2c38e36fc211c39cae7e4dc7c655b6c968622e7bc"},
 }
@@ -104,9 +104,15 @@ func cacheRoot() string {
 	return filepath.Join(os.TempDir(), "kandev-provider-usage")
 }
 
-// binPath is where the pinned binary for this platform is cached.
+// binPath is where the pinned binary for this platform is cached. Including
+// the asset suffix prevents an artifact change at the same upstream version
+// (such as glibc to static musl) from reusing an incompatible cached binary.
 func (d *downloader) binPath() string {
-	return filepath.Join(d.cacheDir, "codexbar", pinnedVersion, codexbarBinName)
+	asset, ok := codexbarAssets[d.platform]
+	if !ok {
+		return filepath.Join(d.cacheDir, "codexbar", pinnedVersion, codexbarBinName)
+	}
+	return filepath.Join(d.cacheDir, "codexbar", pinnedVersion, asset.suffix, codexbarBinName)
 }
 
 // ensure returns a path to a ready-to-run codexbar binary, downloading and

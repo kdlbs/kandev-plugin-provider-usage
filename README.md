@@ -72,9 +72,10 @@ the CLI in this order:
    `/usr/local/bin/codexbar`);
 2. a `codexbar` binary on `PATH`;
 3. otherwise it **downloads a pinned build once**, verifies it against a
-   bundled SHA-256, and caches it under `~/.config/kandev-provider-usage`
-   (macOS and Linux only — codexbar has no Windows build, so set an explicit
-   path there).
+   bundled SHA-256, and caches it under `~/.config/kandev-provider-usage`.
+   Linux uses upstream's fully static musl builds so it does not depend on the
+   host's glibc version. macOS uses the native builds. codexbar has no Windows
+   build, so set an explicit path there.
 
 When that fails, the plugin doesn't just go quiet: the **Integration status**
 card on the settings page shows which of those three paths was tried, the raw

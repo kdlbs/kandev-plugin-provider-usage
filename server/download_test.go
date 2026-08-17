@@ -81,7 +81,7 @@ func TestDownloaderEnsure_DownloadsVerifiesCaches(t *testing.T) {
 
 	bin, err := d.ensure(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, filepath.Join(d.cacheDir, "codexbar", pinnedVersion, codexbarBinName), bin)
+	require.Equal(t, filepath.Join(d.cacheDir, "codexbar", pinnedVersion, orig.suffix, codexbarBinName), bin)
 	require.True(t, isExecutableFile(bin))
 	require.Equal(t, 1, calls)
 
@@ -90,6 +90,20 @@ func TestDownloaderEnsure_DownloadsVerifiesCaches(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, bin, bin2)
 	require.Equal(t, 1, calls, "cached binary is reused")
+}
+
+func TestLinuxAssetsUseStaticMuslBuilds(t *testing.T) {
+	require.Equal(t, "linux-musl-x86_64", codexbarAssets["linux-amd64"].suffix)
+	require.Equal(t, "7397da556d6400e9c069953c89e6bdbbc41b82d1ddd8b1fe6af576bef9f98487", codexbarAssets["linux-amd64"].sha256)
+	require.Equal(t, "linux-musl-aarch64", codexbarAssets["linux-arm64"].suffix)
+	require.Equal(t, "b209659765da51aaad471ffa194d808e85ca8f59c4b68be86e9045ea5c10bae0", codexbarAssets["linux-arm64"].sha256)
+}
+
+func TestBinPathSeparatesArtifactsAtSameVersion(t *testing.T) {
+	d := &downloader{cacheDir: t.TempDir(), platform: "linux-amd64"}
+	oldPath := filepath.Join(d.cacheDir, "codexbar", pinnedVersion, codexbarBinName)
+	require.NotEqual(t, oldPath, d.binPath())
+	require.Contains(t, d.binPath(), "linux-musl-x86_64")
 }
 
 func TestDownloaderEnsure_ChecksumMismatch(t *testing.T) {
