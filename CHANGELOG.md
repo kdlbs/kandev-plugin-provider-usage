@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1] - 2026-08-17
+
+### Changed
+
+- Use static CodexBar builds on Linux (#17) (b663356)
+
+
 ## [0.4.0] - 2026-08-16
 
 ### Changed
