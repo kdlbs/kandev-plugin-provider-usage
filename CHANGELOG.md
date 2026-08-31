@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0] - 2026-08-31
+
+### Changed
+
+- fix: accept the Win-CodexBar CLI's JSON, and stop one failed provider discarding the whole report (#18) (f073405)
+
+
 ## [0.4.1] - 2026-08-17
 
 ### Changed
