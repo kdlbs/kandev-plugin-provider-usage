@@ -8,10 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/pkg/pluginsdk"
 	"github.com/stretchr/testify/require"
@@ -632,7 +635,8 @@ func TestHandleWebhook_ProvidersReportsInstallFailure(t *testing.T) {
 // TestWithStderr keeps a failing codexbar's reason visible: exec.Cmd.Output()
 // reports only "exit status N", while its stderr holds the actual cause.
 func TestWithStderr(t *testing.T) {
-	_, err := exec.Command("sh", "-c", "echo 'config file is corrupt' >&2; exit 3").Output()
+	t.Setenv(helperEnv, "stderr-exit")
+	_, err := exec.Command(os.Args[0]).Output()
 	require.Error(t, err)
 	require.Equal(t, "exit status 3: config file is corrupt", withStderr(err).Error())
 
@@ -640,10 +644,98 @@ func TestWithStderr(t *testing.T) {
 	require.Equal(t, plain, withStderr(plain), "non-exit errors pass through unchanged")
 }
 
+// TestWithStderr_SkipsTracingLines covers the Win-CodexBar port, which writes
+// structured log lines to stderr ahead of the actual cause.
+func TestWithStderr_SkipsTracingLines(t *testing.T) {
+	t.Setenv(helperEnv, "tracing-stderr")
+	_, err := exec.Command(os.Args[0]).Output()
+	require.Error(t, err)
+	require.Equal(t, "exit status 1: provider claude is not signed in", withStderr(err).Error())
+}
+
 func TestFirstLine(t *testing.T) {
 	require.Equal(t, "cause", firstLine("\n\n  cause  \nstack frame\n"))
 	require.Equal(t, "", firstLine("   \n"))
 	require.Equal(t, strings.Repeat("x", 200)+"…", firstLine(strings.Repeat("x", 400)))
+}
+
+func TestFirstUsefulLine(t *testing.T) {
+	// The captured line still carries codexbar's color escapes.
+	tracing := sampleTracingStderr + "provider claude is not signed in\n"
+	require.Equal(t, "provider claude is not signed in", firstUsefulLine(tracing))
+
+	// A killed run can emit nothing else; the log line beats an empty message —
+	// but never with escape bytes in it.
+	got := firstUsefulLine(sampleTracingStderr)
+	require.Contains(t, got, "ABE) detected")
+	require.NotContains(t, got, "\x1b", "escape sequences never reach the operator")
+
+	// The same line without color must be recognized too, for a build or a
+	// platform where the logging layer honours NO_COLOR.
+	require.Equal(t, "the real cause",
+		firstUsefulLine(stripSGR(sampleTracingStderr)+"the real cause\n"))
+
+	// Upstream codexbar's swift-log writes a colon-less UTC offset, which is not
+	// RFC3339 — its stderr selection is unchanged by the skip.
+	const swiftLog = "2026-08-27T22:01:41+0000 error CodexBar : keychain item not found\n"
+	require.Equal(t, "2026-08-27T22:01:41+0000 error CodexBar : keychain item not found", firstUsefulLine(swiftLog))
+
+	require.Equal(t, "plain cause", firstUsefulLine("plain cause\nstack frame\n"))
+	require.Equal(t, "", firstUsefulLine("  \n"))
+}
+
+// TestRunnerBoundsWaitOnLeakedPipe pins the WaitDelay on the production runner:
+// without it, Wait blocks until every process holding the output pipe exits, so
+// a codexbar run that leaks its handles would wedge the poller behind pollMu.
+func TestRunnerBoundsWaitOnLeakedPipe(t *testing.T) {
+	stop := filepath.Join(t.TempDir(), "release-holder")
+	t.Cleanup(func() {
+		_ = os.WriteFile(stop, nil, 0o644)
+		for range 500 {
+			if _, err := os.Stat(stop + ".released"); err == nil {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		time.Sleep(50 * time.Millisecond) // let the announced exit actually happen
+	})
+	t.Setenv(helperStopEnv, stop)
+	t.Setenv(helperEnv, "spawn-holder")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	_, err := newPlugin().run(ctx, os.Args[0])
+	elapsed := time.Since(start)
+
+	// Assert the mechanism, not just "an error": the helper's own failure paths
+	// also produce an ExitError quickly, which would green-light a broken setup.
+	require.ErrorIs(t, err, exec.ErrWaitDelay,
+		"run must return on WaitDelay, not on the helper's own exit status")
+	// Coarse backstop only — process start on Windows can cost seconds when the
+	// test binary is cold.
+	require.Less(t, elapsed, 20*time.Second,
+		"run must return on WaitDelay, not wait out the process holding the pipe")
+}
+
+func TestParseConfiguredCommand(t *testing.T) {
+	exe := filepath.Join(t.TempDir(), "code xbar cli.exe")
+	require.NoError(t, os.WriteFile(exe, []byte("binary"), 0o644))
+
+	require.Equal(t, []string{exe}, parseConfiguredCommand(exe),
+		"a path that exists is taken whole, spaces included")
+	require.Equal(t, []string{exe}, parseConfiguredCommand(`"`+exe+`"`),
+		`Explorer's "Copy as path" wraps the path in quotes`)
+	require.Equal(t, []string{exe}, parseConfiguredCommand("  "+exe+"  "))
+
+	require.Equal(t, []string{"npx", "codexbar"}, parseConfiguredCommand("npx codexbar"),
+		"a command with arguments keeps the whitespace split")
+	require.Equal(t, []string{"codexbar"}, parseConfiguredCommand("codexbar"))
+
+	require.Nil(t, parseConfiguredCommand(""), "the unconfigured default")
+	require.Nil(t, parseConfiguredCommand("   "))
+	require.Equal(t, []string{`"`}, parseConfiguredCommand(`"`), "a lone quote is not a quoted path")
+	require.Nil(t, parseConfiguredCommand(`""`))
 }
 
 func TestPollOnceDedupsWithinMaxAge(t *testing.T) {
@@ -658,4 +750,20 @@ func TestPollOnceDedupsWithinMaxAge(t *testing.T) {
 
 	p.pollOnce(ctx, 0)
 	require.Equal(t, int32(2), atomic.LoadInt32(&calls), "maxAge 0 forces a rebuild")
+}
+
+func TestProviderErrMessage(t *testing.T) {
+	failed := errors.New("exit status 1: not signed in")
+
+	live := context.Background()
+	require.Equal(t, failed.Error(), providerErrMessage(failed, live, live),
+		"an ordinary failure keeps its own message")
+
+	expired, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.Equal(t, "codexbar timed out after 20s", providerErrMessage(failed, expired, live),
+		"this provider's own deadline is reported as a timeout")
+
+	require.Equal(t, failed.Error(), providerErrMessage(failed, expired, expired),
+		"a cancelled report is not this provider's timeout, so the run error is more useful")
 }

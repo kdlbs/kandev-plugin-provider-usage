@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -41,7 +42,11 @@ func TestExtractTarGz(t *testing.T) {
 	require.NoError(t, extractTarGz(tarGz, dest, "CodexBarCLI"))
 
 	bin := filepath.Join(dest, "CodexBarCLI")
-	require.True(t, isExecutableFile(bin))
+	if runtime.GOOS != "windows" {
+		// Go reports mode 0666 for every file on Windows, so the exec bit the
+		// extractor sets is unobservable there. The download path is unix-only.
+		require.True(t, isExecutableFile(bin))
+	}
 	got, err := os.ReadFile(bin)
 	require.NoError(t, err)
 	require.Equal(t, "#!/bin/sh\necho hi\n", string(got))
@@ -82,8 +87,15 @@ func TestDownloaderEnsure_DownloadsVerifiesCaches(t *testing.T) {
 	bin, err := d.ensure(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, filepath.Join(d.cacheDir, "codexbar", pinnedVersion, orig.suffix, codexbarBinName), bin)
-	require.True(t, isExecutableFile(bin))
 	require.Equal(t, 1, calls)
+	if runtime.GOOS == "windows" {
+		// ensure()'s warm path stats for an exec bit Windows never reports, so the
+		// cache would never be reused here. codexbarAssets has no Windows entry:
+		// this path is unreachable on the platform, and only the assertions below
+		// depend on it.
+		return
+	}
+	require.True(t, isExecutableFile(bin))
 
 	// Second call is served from cache — no re-download.
 	bin2, err := d.ensure(context.Background())
