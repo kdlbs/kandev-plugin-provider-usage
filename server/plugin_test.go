@@ -398,6 +398,29 @@ func TestHandleWebhook_SessionOnDemandForUnpolledProvider(t *testing.T) {
 	require.Equal(t, "claude", report.Usage.Provider)
 }
 
+func TestHandleWebhook_SessionOnDemandReportsCommandError(t *testing.T) {
+	// A hard command error outside the polled set must reach the session card,
+	// instead of returning an empty report after logging the error only.
+	run := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if len(args) > 0 && args[len(args)-1] == "--version" {
+			return []byte("CodexBar 0.45.2\n"), nil
+		}
+		return nil, errors.New("exec: codexbar: crashed")
+	}
+	cfg := codexbarConfig(map[string]any{"codexbar_providers": "codex"})
+	sessions := []pluginsdk.Session{session("kandev-sess", "Claude Code")}
+	p := newTestPlugin(t, cfg, sessions, run)
+
+	resp, err := p.HandleWebhook(context.Background(),
+		webhookGet(webhookKeySession, "task_id=task-1&active=kandev-sess"))
+	require.NoError(t, err)
+
+	var report SessionUsageReport
+	require.NoError(t, json.Unmarshal(resp.Body, &report))
+	require.Equal(t, "claude", report.Provider)
+	require.Contains(t, report.Error, "running codexbar")
+}
+
 func TestHandleWebhook_SessionThresholdsFromConfig(t *testing.T) {
 	cfg := codexbarConfig(map[string]any{"display_threshold_warn": 60.0, "display_threshold_high": 85.0})
 	sessions := []pluginsdk.Session{session("kandev-sess", "Claude Code")}
@@ -721,11 +744,14 @@ func TestRunnerBoundsWaitOnLeakedPipe(t *testing.T) {
 func TestParseConfiguredCommand(t *testing.T) {
 	exe := filepath.Join(t.TempDir(), "code xbar cli.exe")
 	require.NoError(t, os.WriteFile(exe, []byte("binary"), 0o644))
+	missing := filepath.Join(t.TempDir(), "missing xbar cli.exe")
 
 	require.Equal(t, []string{exe}, parseConfiguredCommand(exe),
 		"a path that exists is taken whole, spaces included")
 	require.Equal(t, []string{exe}, parseConfiguredCommand(`"`+exe+`"`),
 		`Explorer's "Copy as path" wraps the path in quotes`)
+	require.Equal(t, []string{missing}, parseConfiguredCommand(`"`+missing+`"`),
+		"a missing quoted path stays whole for a useful probe error")
 	require.Equal(t, []string{exe}, parseConfiguredCommand("  "+exe+"  "))
 
 	require.Equal(t, []string{"npx", "codexbar"}, parseConfiguredCommand("npx codexbar"),

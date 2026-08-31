@@ -258,11 +258,19 @@ func (p *plugin) resolveCommand(ctx context.Context) resolvedCommand {
 // old whitespace split, so "npx codexbar" still works.
 func parseConfiguredCommand(s string) []string {
 	s = strings.TrimSpace(s)
+	quoted := false
 	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		quoted = true
 		s = strings.TrimSpace(s[1 : len(s)-1])
 	}
 	if s == "" {
 		return nil
+	}
+	// Keep a quoted path as one argv item even when it does not exist yet. This
+	// preserves the full path in the probe error, instead of splitting a Windows
+	// path with spaces into unrelated arguments.
+	if quoted {
+		return []string{s}
 	}
 	if info, err := os.Stat(s); err == nil && info.Mode().IsRegular() {
 		return []string{s}
@@ -712,6 +720,7 @@ func (p *plugin) sessionJSON(ctx context.Context, taskID, activeSessionID string
 	entries, err := runUsageFast(runCtx, p.resolveCommand(runCtx), p.run, report.Provider)
 	if err != nil {
 		log.Printf("codexbar session run failed (degrading): %v", err)
+		report.Error = providerErrMessage(err, runCtx, ctx)
 		return marshalOr(report, sessionEncodeErr)
 	}
 	report.Usage, report.Error = pickProviderUsage(entries, report.Provider, p.now())
