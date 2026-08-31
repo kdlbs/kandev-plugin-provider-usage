@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -117,7 +119,18 @@ var _ pluginsdk.Plugin = (*plugin)(nil)
 func newPlugin() *plugin {
 	return &plugin{
 		run: func(ctx context.Context, name string, args ...string) ([]byte, error) {
-			out, err := exec.CommandContext(ctx, name, args...).Output()
+			cmd := exec.CommandContext(ctx, name, args...)
+			// --no-color only reaches codexbar's own output; its log lines are
+			// colored by the logging layer and reach stderr as escape sequences
+			// even through a pipe. NO_COLOR turns those off, so a failure reason
+			// lifted from stderr is readable on the Settings card.
+			cmd.Env = append(os.Environ(), "NO_COLOR=1")
+			// Killing the process on a context deadline doesn't unblock Wait: it
+			// keeps reading the output pipe until every process holding the write
+			// end exits. WaitDelay bounds that, so a codexbar run that leaks its
+			// handles to a child can't wedge the poller (which holds pollMu).
+			cmd.WaitDelay = 2 * time.Second
+			out, err := cmd.Output()
 			return out, withStderr(err)
 		},
 		lookPath: exec.LookPath,
@@ -224,7 +237,7 @@ func jsonResponse(status int32, body []byte) *pluginsdk.WebhookResponse {
 // (downloaded + cached on first use). A resolution failure is carried on the
 // returned command's Err so callers can degrade to setup guidance.
 func (p *plugin) resolveCommand(ctx context.Context) resolvedCommand {
-	if argv := strings.Fields(p.configuredCommand(ctx)); len(argv) > 0 {
+	if argv := parseConfiguredCommand(p.configuredCommand(ctx)); len(argv) > 0 {
 		return resolvedCommand{Argv: argv, Source: sourceSettings}
 	}
 	if path, err := p.lookPath("codexbar"); err == nil {
@@ -237,6 +250,34 @@ func (p *plugin) resolveCommand(ctx context.Context) resolvedCommand {
 	return resolvedCommand{Argv: []string{bin}, Source: sourceDownload, CacheDir: p.dl.cacheDir}
 }
 
+// parseConfiguredCommand splits the operator's command into argv. A lone path is
+// taken whole so it may contain spaces — the setting is documented as a path,
+// and on Windows the default install lives under a user profile directory that
+// often has one. Surrounding quotes are dropped first because that is what
+// Explorer's "Copy as path" yields. Anything that isn't a path on disk keeps the
+// old whitespace split, so "npx codexbar" still works.
+func parseConfiguredCommand(s string) []string {
+	s = strings.TrimSpace(s)
+	quoted := false
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		quoted = true
+		s = strings.TrimSpace(s[1 : len(s)-1])
+	}
+	if s == "" {
+		return nil
+	}
+	// Keep a quoted path as one argv item even when it does not exist yet. This
+	// preserves the full path in the probe error, instead of splitting a Windows
+	// path with spaces into unrelated arguments.
+	if quoted {
+		return []string{s}
+	}
+	if info, err := os.Stat(s); err == nil && info.Mode().IsRegular() {
+		return []string{s}
+	}
+	return strings.Fields(s)
+}
+
 // withStderr folds a failed command's stderr into its error, so a probe failure
 // reads "exit status 1: dyld: Library not loaded" on the Settings card instead
 // of a bare exit code. Only the first stderr line is kept — codexbar's failures
@@ -246,12 +287,52 @@ func withStderr(err error) error {
 	if !errors.As(err, &exitErr) {
 		return err
 	}
-	detail := firstLine(string(exitErr.Stderr))
+	detail := firstUsefulLine(string(exitErr.Stderr))
 	if detail == "" {
 		return err
 	}
 	return fmt.Errorf("%w: %s", err, detail)
 }
+
+// firstUsefulLine picks the stderr line that names the cause, skipping the
+// structured log lines the Win-CodexBar port writes there. A killed run can emit
+// nothing but those, so a timeout would otherwise be reported to the operator as
+// a cookie-decryption warning.
+//
+// A line counts as a log line when its first token parses as an RFC3339
+// timestamp. The level word is deliberately not matched: the port honours an
+// inherited RUST_LOG, so any level can appear. Upstream codexbar's own stderr is
+// untouched by this — swift-log writes a "+0000" offset, which RFC3339 rejects.
+// When every line is a log line, the first one is still better than nothing.
+//
+// Color is stripped first. The runner asks for NO_COLOR, but a build that
+// ignores it would otherwise wrap the timestamp in escape sequences — hiding it
+// from the check, and putting raw escape bytes on the Settings card.
+func firstUsefulLine(s string) string {
+	s = stripSGR(s)
+	for _, line := range strings.Split(s, "\n") {
+		if strings.TrimSpace(line) == "" || isLogLine(line) {
+			continue
+		}
+		return firstLine(line)
+	}
+	return firstLine(s)
+}
+
+func isLogLine(line string) bool {
+	token, _, ok := strings.Cut(strings.TrimSpace(line), " ")
+	if !ok {
+		return false
+	}
+	_, err := time.Parse(time.RFC3339, token)
+	return err == nil
+}
+
+// sgrPattern matches the "select graphic rendition" escapes a colored log line
+// is built from (ESC [ ... m) — the only kind codexbar emits.
+var sgrPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+func stripSGR(s string) string { return sgrPattern.ReplaceAllString(s, "") }
 
 // firstLine returns the first non-blank line of s, truncated to a length that
 // still fits the Settings card.
@@ -554,7 +635,10 @@ func (p *plugin) queryProviders(ctx context.Context, cmd resolvedCommand, provid
 			defer cancel()
 			es, err := runUsageFast(cctx, cmd, p.run, prov)
 			if err != nil {
-				results[i] = result{perr: &ProviderError{Provider: prov, Message: err.Error()}}
+				results[i] = result{perr: &ProviderError{
+					Provider: prov,
+					Message:  providerErrMessage(err, cctx, ctx),
+				}}
 				return
 			}
 			results[i] = result{entries: es}
@@ -571,6 +655,18 @@ func (p *plugin) queryProviders(ctx context.Context, cmd resolvedCommand, provid
 		entries = append(entries, r.entries...)
 	}
 	return entries
+}
+
+// providerErrMessage names what actually went wrong for one provider. A killed
+// process reports its exit status rather than the deadline, so a per-provider
+// timeout would otherwise reach the operator as "exit status 1" next to whatever
+// the CLI last wrote to stderr. Only this provider's own deadline counts: when
+// the whole report was cancelled, the run's error is the more useful one.
+func providerErrMessage(err error, runCtx, parent context.Context) string {
+	if runCtx.Err() != nil && parent.Err() == nil {
+		return fmt.Sprintf("codexbar timed out after %s", perProviderTimeout)
+	}
+	return err.Error()
 }
 
 // --- session webhook (chat-bar icon) ------------------------------------------
@@ -624,6 +720,7 @@ func (p *plugin) sessionJSON(ctx context.Context, taskID, activeSessionID string
 	entries, err := runUsageFast(runCtx, p.resolveCommand(runCtx), p.run, report.Provider)
 	if err != nil {
 		log.Printf("codexbar session run failed (degrading): %v", err)
+		report.Error = providerErrMessage(err, runCtx, ctx)
 		return marshalOr(report, sessionEncodeErr)
 	}
 	report.Usage, report.Error = pickProviderUsage(entries, report.Provider, p.now())

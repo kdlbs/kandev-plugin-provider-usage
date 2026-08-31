@@ -10,9 +10,12 @@ import (
 // the native kandev "Subscription Utilization" feature exposed, so the UI shape
 // is unchanged by moving the capability into this plugin.
 type UtilizationWindow struct {
-	Label          string    `json:"label"`           // e.g. "5-hour", "weekly"
-	UtilizationPct float64   `json:"utilization_pct"` // 0–100
-	ResetAt        time.Time `json:"reset_at"`
+	Label          string  `json:"label"`           // e.g. "5-hour", "weekly"
+	UtilizationPct float64 `json:"utilization_pct"` // 0–100
+	// ResetAt is omitted when unknown: the zero time would serialize as
+	// "0001-01-01T00:00:00Z", which the UI reads as a real (long past) date and
+	// renders as "resets now" instead of falling back to ResetDescription.
+	ResetAt time.Time `json:"reset_at,omitzero"`
 	// ResetDescription is codexbar's human-friendly reset string, kept verbatim
 	// because it already carries the provider's own timezone/wording.
 	ResetDescription string `json:"reset_description,omitempty"`
@@ -50,6 +53,16 @@ type ProviderUsage struct {
 }
 
 // --- codexbar JSON wire types (subset of `codexbar usage --format json`) ------
+//
+// Two CLIs feed these types and they spell the usage payload differently:
+// upstream codexbar emits camelCase, while the Win-CodexBar port (the only
+// codexbar-compatible CLI on Windows) emits snake_case and reports a failing
+// provider's `error` as a bare string rather than an object. Both spellings are
+// accepted as co-equal — the port may re-converge on upstream's, or upstream may
+// change — via UnmarshalJSON methods that decode the camelCase form through the
+// existing tags and let the snake_case form fill in whatever it left zero. That
+// merge rule is safe because a single CLI never writes both spellings, so the
+// absent one always decodes to the zero value.
 
 // cbEntry is one element of codexbar's top-level JSON array (one per provider).
 type cbEntry struct {
@@ -67,6 +80,20 @@ type cbError struct {
 	Message string `json:"message"`
 }
 
+// UnmarshalJSON accepts both an object (upstream) and a bare string (the port),
+// which is the difference that matters most: a string here used to fail the
+// whole array's decode, discarding every healthy provider alongside the one that
+// reported an error.
+func (e *cbError) UnmarshalJSON(data []byte) error {
+	var msg string
+	if err := json.Unmarshal(data, &msg); err == nil {
+		e.Message = msg
+		return nil
+	}
+	type alias cbError
+	return json.Unmarshal(data, (*alias)(e))
+}
+
 type cbUsage struct {
 	Primary     *cbWindow   `json:"primary"`
 	Secondary   *cbWindow   `json:"secondary"`
@@ -75,6 +102,35 @@ type cbUsage struct {
 	LoginMethod string      `json:"loginMethod"`
 	Identity    *cbIdentity `json:"identity"`
 	UpdatedAt   string      `json:"updatedAt"`
+}
+
+// UnmarshalJSON fills the fields the port spells with underscores. It carries no
+// `identity` block at all, so planName falls through to LoginMethod, which it
+// populates with the plan ("Claude Max 5x").
+func (u *cbUsage) UnmarshalJSON(data []byte) error {
+	type alias cbUsage
+	if err := json.Unmarshal(data, (*alias)(u)); err != nil {
+		return err
+	}
+	var snake struct {
+		Extra       []cbExtra `json:"extra_rate_windows"`
+		LoginMethod string    `json:"login_method"`
+		UpdatedAt   string    `json:"updated_at"`
+	}
+	// Best-effort: a wrongly-typed key here was simply skipped before these
+	// spellings were known, and must stay non-fatal — failing the document would
+	// discard every healthy provider in the array alongside it.
+	_ = json.Unmarshal(data, &snake)
+	if len(u.Extra) == 0 {
+		u.Extra = snake.Extra
+	}
+	if u.LoginMethod == "" {
+		u.LoginMethod = snake.LoginMethod
+	}
+	if u.UpdatedAt == "" {
+		u.UpdatedAt = snake.UpdatedAt
+	}
+	return nil
 }
 
 type cbIdentity struct {
@@ -87,6 +143,36 @@ type cbWindow struct {
 	ResetDescription string  `json:"resetDescription"`
 	UsedPercent      float64 `json:"usedPercent"`
 	WindowMinutes    int     `json:"windowMinutes"`
+}
+
+// UnmarshalJSON fills the fields the port spells with underscores. A window the
+// port reports as used_percent 0 stays 0 either way, so the zero-value merge
+// rule can't lose a legitimately empty window.
+func (w *cbWindow) UnmarshalJSON(data []byte) error {
+	type alias cbWindow
+	if err := json.Unmarshal(data, (*alias)(w)); err != nil {
+		return err
+	}
+	var snake struct {
+		ResetsAt         string  `json:"resets_at"`
+		ResetDescription string  `json:"reset_description"`
+		UsedPercent      float64 `json:"used_percent"`
+		WindowMinutes    int     `json:"window_minutes"`
+	}
+	_ = json.Unmarshal(data, &snake) // best-effort, see cbUsage.UnmarshalJSON
+	if w.ResetsAt == "" {
+		w.ResetsAt = snake.ResetsAt
+	}
+	if w.ResetDescription == "" {
+		w.ResetDescription = snake.ResetDescription
+	}
+	if w.UsedPercent == 0 {
+		w.UsedPercent = snake.UsedPercent
+	}
+	if w.WindowMinutes == 0 {
+		w.WindowMinutes = snake.WindowMinutes
+	}
+	return nil
 }
 
 type cbExtra struct {
