@@ -219,7 +219,7 @@ func TestDownloadHint_NamesThePlatformsOwnVersion(t *testing.T) {
 	hint := downloadHint(&installError{
 		Kind:    installErrDownload,
 		URL:     winAsset.url,
-		Version: winAsset.version(),
+		Version: winAsset.version,
 		Err:     errors.New("unexpected status 404"),
 	})
 	require.Contains(t, hint, winPinnedVersion)

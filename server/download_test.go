@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -87,6 +88,13 @@ func TestDownloaderEnsure_DownloadsVerifiesCaches(t *testing.T) {
 	require.Equal(t, filepath.Join(d.cacheDir, "codexbar", pinnedVersion, orig.suffix, codexbarBinName), bin)
 	require.Equal(t, 1, calls)
 	require.True(t, isRunnableFile(bin))
+
+	if runtime.GOOS == "windows" {
+		// This case claims a unix platform, so the cache check looks for an exec
+		// bit — which a Windows filesystem cannot carry, whatever the extractor
+		// asked for. Reuse under Windows semantics is TestDownloaderEnsure_Windows.
+		return
+	}
 
 	// Second call is served from cache — no re-download.
 	bin2, err := d.ensure(context.Background())
