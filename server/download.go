@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // pinnedVersion is the upstream codexbar release the macOS and Linux
@@ -32,10 +33,12 @@ const winPinnedVersion = "0.56.8"
 const codexbarBinName = "CodexBarCLI"
 const winCodexbarBinName = "codexbar-cli.exe"
 
-// platformAsset is one platform's CLI download: where to get it, the pinned
-// SHA-256 from the release's published .sha256 sidecar, what the executable
-// inside is called, and whether the archive is a zip rather than a tarball.
+// platformAsset is one platform's CLI download: its release version, where to
+// get it, the pinned SHA-256 from the release's published .sha256 sidecar, what
+// the executable inside is called, and whether the archive is a zip rather than
+// a tarball.
 type platformAsset struct {
+	version string
 	// suffix names the artifact within the cache path, so an artifact change at
 	// the same version (such as glibc to static musl) can't reuse an
 	// incompatible cached binary.
@@ -55,6 +58,7 @@ var codexbarAssets = map[string]platformAsset{
 	"darwin-amd64": upstreamAsset("macos-x86_64", "fb433b69f91b1459a6be2f1c630814eb71f84e9e63ed28bce0e56a3bea6feb5a"),
 	"darwin-arm64": upstreamAsset("macos-arm64", "df83f412016bbb70c3011ae2c38e36fc211c39cae7e4dc7c655b6c968622e7bc"),
 	"windows-amd64": {
+		version: winPinnedVersion,
 		suffix:  "windows-x64",
 		sha256:  "9c547e004f219d4e226ef557bc1cdae790cae6534aa013a895642585dd10e2be",
 		url:     winCodexbarURL("windows-x64"),
@@ -64,7 +68,13 @@ var codexbarAssets = map[string]platformAsset{
 }
 
 func upstreamAsset(suffix, sha string) platformAsset {
-	return platformAsset{suffix: suffix, sha256: sha, url: codexbarURL(suffix), binName: codexbarBinName}
+	return platformAsset{
+		version: pinnedVersion,
+		suffix:  suffix,
+		sha256:  sha,
+		url:     codexbarURL(suffix),
+		binName: codexbarBinName,
+	}
 }
 
 // installErrKind classifies why the auto-download path couldn't produce a
@@ -150,16 +160,7 @@ func (d *downloader) binPath() string {
 	if !ok {
 		return filepath.Join(d.cacheDir, "codexbar", pinnedVersion, codexbarBinName)
 	}
-	return filepath.Join(d.cacheDir, "codexbar", asset.version(), asset.suffix, asset.binName)
-}
-
-// version is the release the asset was pinned to. The Windows port versions
-// independently of upstream, so this cannot be a single constant.
-func (a platformAsset) version() string {
-	if a.zipped {
-		return winPinnedVersion
-	}
-	return pinnedVersion
+	return filepath.Join(d.cacheDir, "codexbar", asset.version, asset.suffix, asset.binName)
 }
 
 // ensure returns a path to a ready-to-run codexbar binary, downloading and
@@ -174,7 +175,7 @@ func (d *downloader) ensure(ctx context.Context) (string, error) {
 		}
 	}
 	bin := d.binPath()
-	if isRunnableFile(bin) {
+	if isRunnableFileForPlatform(bin, d.platform) {
 		return bin, nil
 	}
 	if err := d.install(ctx, asset, filepath.Dir(bin)); err != nil {
@@ -188,7 +189,7 @@ func (d *downloader) ensure(ctx context.Context) (string, error) {
 // just the binary) because upstream codexbar reads its sibling VERSION file to
 // report its own version; the executable is the member named asset.binName.
 func (d *downloader) install(ctx context.Context, asset platformAsset, versionDir string) error {
-	url, version := asset.url, asset.version()
+	url, version := asset.url, asset.version
 	body, err := d.fetch(ctx, url)
 	if err != nil {
 		return &installError{Kind: installErrDownload, URL: url, Version: version, Err: fmt.Errorf("downloading codexbar: %w", err)}
@@ -347,11 +348,15 @@ func sha256Hex(b []byte) string {
 // including a .exe — so being a regular file is the whole test. Checking the bit
 // anyway would leave the cache permanently cold, re-downloading on every poll.
 func isRunnableFile(path string) bool {
+	return isRunnableFileForPlatform(path, runtime.GOOS)
+}
+
+func isRunnableFileForPlatform(path, platform string) bool {
 	info, err := os.Stat(path)
 	if err != nil || !info.Mode().IsRegular() {
 		return false
 	}
-	if runtime.GOOS == "windows" {
+	if platform == "windows" || strings.HasPrefix(platform, "windows-") {
 		return true
 	}
 	return info.Mode()&0o111 != 0

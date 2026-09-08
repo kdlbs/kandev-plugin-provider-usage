@@ -224,6 +224,7 @@ func TestDownloaderEnsure_Windows(t *testing.T) {
 		filepath.Join(d.cacheDir, "codexbar", winPinnedVersion, orig.suffix, winCodexbarBinName), bin,
 		"the Windows cache path carries the port's own version")
 	require.Equal(t, 1, calls)
+	require.NoError(t, os.Chmod(bin, 0o644))
 
 	bin2, err := d.ensure(context.Background())
 	require.NoError(t, err)
@@ -237,7 +238,7 @@ func TestWindowsAssetPointsAtThePort(t *testing.T) {
 	a := codexbarAssets["windows-amd64"]
 	require.True(t, a.zipped)
 	require.Equal(t, winCodexbarBinName, a.binName)
-	require.Equal(t, winPinnedVersion, a.version())
+	require.Equal(t, winPinnedVersion, a.version)
 	require.Equal(t,
 		"https://github.com/nesszer/Win-CodexBar/releases/download/v"+winPinnedVersion+
 			"/CodexBarCLI-v"+winPinnedVersion+"-windows-x64.zip", a.url)

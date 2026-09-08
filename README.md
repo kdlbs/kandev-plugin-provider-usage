@@ -80,6 +80,8 @@ Upstream codexbar publishes no Windows CLI. Windows instead downloads the CLI
 from [Win-CodexBar](https://github.com/nesszer/Win-CodexBar), a third-party port
 that publishes a compatible `codexbar-cli.exe`; it is pinned and SHA-256 verified
 the same way, and versioned separately because that port cuts its own releases.
+The CLI ZIP is currently unsigned, so the pinned checksum does not replace code
+signing or the need to trust the release publisher.
 Nothing has to be installed by hand on any platform.
 
 When that fails, the plugin doesn't just go quiet: the **Integration status**
