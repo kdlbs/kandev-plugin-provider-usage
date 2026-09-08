@@ -81,9 +81,9 @@ config_schema:
       title: "codexbar · CLI command"
       description: >-
         Path to the codexbar CLI. Empty = auto-detect (PATH, else a pinned
-        per-platform binary is downloaded once, SHA-256 verified). Windows has no
-        codexbar build — set a path there. If resolution fails, the Integration
-        status card below shows what was tried and what to fix.
+        per-platform binary is downloaded once, SHA-256 verified) — including on
+        Windows, which uses the Win-CodexBar port's CLI. If resolution fails, the
+        Integration status card below shows what was tried and what to fix.
     codexbar_poll_minutes:
       type: number
       default: 5

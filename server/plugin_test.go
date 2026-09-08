@@ -640,7 +640,7 @@ func TestProvidersStatusBarMode(t *testing.T) {
 // at, and the hint that names the operator's next step.
 func TestHandleWebhook_ProvidersReportsInstallFailure(t *testing.T) {
 	p := newTestPlugin(t, map[string]any{}, nil, nil) // empty config + no PATH -> download path
-	p.dl.platform = "windows-amd64"                   // no prebuilt CLI exists
+	p.dl.platform = "linux-386"                       // no prebuilt CLI exists for this one
 
 	resp, err := p.HandleWebhook(context.Background(), webhookGet(webhookKeyProviders, ""))
 	require.NoError(t, err)
@@ -651,8 +651,8 @@ func TestHandleWebhook_ProvidersReportsInstallFailure(t *testing.T) {
 	require.False(t, report.Codexbar.Installed)
 	require.Equal(t, sourceDownload, report.Codexbar.Source)
 	require.Equal(t, stageResolve, report.Codexbar.Stage)
-	require.Contains(t, report.Codexbar.Error, "no prebuilt CLI for windows-amd64")
-	require.Contains(t, report.Codexbar.Hint, "macOS and Linux")
+	require.Contains(t, report.Codexbar.Error, "no prebuilt CLI for linux-386")
+	require.Contains(t, report.Codexbar.Hint, "No prebuilt codexbar CLI is published for this platform")
 }
 
 // TestWithStderr keeps a failing codexbar's reason visible: exec.Cmd.Output()

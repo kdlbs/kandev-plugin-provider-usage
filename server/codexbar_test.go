@@ -148,12 +148,12 @@ func TestInstallHint_ByDownloadFailure(t *testing.T) {
 	}{
 		{
 			"unsupported platform",
-			&installError{Kind: installErrUnsupported, Err: errors.New("no prebuilt CLI for windows-amd64")},
-			[]string{"macOS and Linux", settingName},
+			&installError{Kind: installErrUnsupported, Err: errors.New("no prebuilt CLI for linux-386")},
+			[]string{"No prebuilt codexbar CLI is published for this platform", settingName},
 		},
 		{
 			"download failed",
-			&installError{Kind: installErrDownload, URL: "https://example.test/cli.tar.gz", Err: errors.New("unexpected status 403")},
+			&installError{Kind: installErrDownload, URL: "https://example.test/cli.tar.gz", Version: pinnedVersion, Err: errors.New("unexpected status 403")},
 			[]string{"https://example.test/cli.tar.gz", "github.com", pinnedVersion},
 		},
 		{
@@ -209,4 +209,19 @@ func TestInstallHint_BySource(t *testing.T) {
 	require.Contains(t, download, "/cache")
 
 	require.Empty(t, installHint(resolvedCommand{Argv: []string{"cb"}}, err), "unknown source has nothing to add")
+}
+
+// TestDownloadHint_NamesThePlatformsOwnVersion guards a bug the Windows entry
+// introduced: the hints used to interpolate the upstream constant, so a Windows
+// operator was told to expect a version the plugin never tried to fetch.
+func TestDownloadHint_NamesThePlatformsOwnVersion(t *testing.T) {
+	winAsset := codexbarAssets["windows-amd64"]
+	hint := downloadHint(&installError{
+		Kind:    installErrDownload,
+		URL:     winAsset.url,
+		Version: winAsset.version(),
+		Err:     errors.New("unexpected status 404"),
+	})
+	require.Contains(t, hint, winPinnedVersion)
+	require.NotContains(t, hint, pinnedVersion, "the upstream version is not what Windows fetches")
 }
