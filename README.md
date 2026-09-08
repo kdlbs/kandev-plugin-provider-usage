@@ -74,8 +74,15 @@ the CLI in this order:
 3. otherwise it **downloads a pinned build once**, verifies it against a
    bundled SHA-256, and caches it under `~/.config/kandev-provider-usage`.
    Linux uses upstream's fully static musl builds so it does not depend on the
-   host's glibc version. macOS uses the native builds. codexbar has no Windows
-   build, so set an explicit path there.
+   host's glibc version. macOS uses the native builds.
+
+Upstream codexbar publishes no Windows CLI. Windows instead downloads the CLI
+from [Win-CodexBar](https://github.com/nesszer/Win-CodexBar), a third-party port
+that publishes a compatible `codexbar-cli.exe`; it is pinned and SHA-256 verified
+the same way, and versioned separately because that port cuts its own releases.
+The CLI ZIP is currently unsigned, so the pinned checksum does not replace code
+signing or the need to trust the release publisher.
+Nothing has to be installed by hand on any platform.
 
 When that fails, the plugin doesn't just go quiet: the **Integration status**
 card on the settings page shows which of those three paths was tried, the raw

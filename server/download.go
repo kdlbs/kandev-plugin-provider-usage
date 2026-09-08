@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -13,32 +14,67 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
-// pinnedVersion is the codexbar release the auto-download path fetches. Pinned so
-// the `usage --format json` shape can't drift under us; bump deliberately after
-// re-probing the output and refreshing the per-platform checksums below.
+// pinnedVersion is the upstream codexbar release the macOS and Linux
+// auto-download path fetches. Pinned so the `usage --format json` shape can't
+// drift under us; bump deliberately after re-probing the output and refreshing
+// the per-platform checksums below.
 const pinnedVersion = "0.45.2"
 
-// codexbarBinName is the executable inside every CodexBarCLI release tarball.
-const codexbarBinName = "CodexBarCLI"
+// winPinnedVersion is the Win-CodexBar release the Windows path fetches. It is
+// versioned separately because that port cuts its own releases and skips
+// upstream versions entirely — the two numbers do not track each other.
+const winPinnedVersion = "0.56.8"
 
-// platformAsset is a codexbar release asset for one Go platform: the tarball's
-// platform suffix and the pinned SHA-256 of the .tar.gz (from the release's
-// published .sha256 sidecars).
+// codexbarBinName is the executable inside every upstream CodexBarCLI tarball;
+// the Windows port names its own binary differently.
+const codexbarBinName = "CodexBarCLI"
+const winCodexbarBinName = "codexbar-cli.exe"
+
+// platformAsset is one platform's CLI download: its release version, where to
+// get it, the pinned SHA-256 from the release's published .sha256 sidecar, what
+// the executable inside is called, and whether the archive is a zip rather than
+// a tarball.
 type platformAsset struct {
-	suffix string
-	sha256 string
+	version string
+	// suffix names the artifact within the cache path, so an artifact change at
+	// the same version (such as glibc to static musl) can't reuse an
+	// incompatible cached binary.
+	suffix  string
+	sha256  string
+	url     string
+	binName string
+	zipped  bool
 }
 
-// codexbarAssets maps GOOS-GOARCH to the codexbar release asset. codexbar ships
-// macOS and Linux CLI builds only — Windows has no entry and degrades to
-// "configure a codexbar path" guidance.
+// codexbarAssets maps GOOS-GOARCH to its CLI download. macOS and Linux come from
+// upstream codexbar; Windows has no upstream build, so it comes from
+// Win-CodexBar, a third-party port that publishes a compatible CLI.
 var codexbarAssets = map[string]platformAsset{
-	"linux-amd64":  {"linux-musl-x86_64", "7397da556d6400e9c069953c89e6bdbbc41b82d1ddd8b1fe6af576bef9f98487"},
-	"linux-arm64":  {"linux-musl-aarch64", "b209659765da51aaad471ffa194d808e85ca8f59c4b68be86e9045ea5c10bae0"},
-	"darwin-amd64": {"macos-x86_64", "fb433b69f91b1459a6be2f1c630814eb71f84e9e63ed28bce0e56a3bea6feb5a"},
-	"darwin-arm64": {"macos-arm64", "df83f412016bbb70c3011ae2c38e36fc211c39cae7e4dc7c655b6c968622e7bc"},
+	"linux-amd64":  upstreamAsset("linux-musl-x86_64", "7397da556d6400e9c069953c89e6bdbbc41b82d1ddd8b1fe6af576bef9f98487"),
+	"linux-arm64":  upstreamAsset("linux-musl-aarch64", "b209659765da51aaad471ffa194d808e85ca8f59c4b68be86e9045ea5c10bae0"),
+	"darwin-amd64": upstreamAsset("macos-x86_64", "fb433b69f91b1459a6be2f1c630814eb71f84e9e63ed28bce0e56a3bea6feb5a"),
+	"darwin-arm64": upstreamAsset("macos-arm64", "df83f412016bbb70c3011ae2c38e36fc211c39cae7e4dc7c655b6c968622e7bc"),
+	"windows-amd64": {
+		version: winPinnedVersion,
+		suffix:  "windows-x64",
+		sha256:  "9c547e004f219d4e226ef557bc1cdae790cae6534aa013a895642585dd10e2be",
+		url:     winCodexbarURL("windows-x64"),
+		binName: winCodexbarBinName,
+		zipped:  true,
+	},
+}
+
+func upstreamAsset(suffix, sha string) platformAsset {
+	return platformAsset{
+		version: pinnedVersion,
+		suffix:  suffix,
+		sha256:  sha,
+		url:     codexbarURL(suffix),
+		binName: codexbarBinName,
+	}
 }
 
 // installErrKind classifies why the auto-download path couldn't produce a
@@ -59,17 +95,29 @@ type installError struct {
 	Kind installErrKind
 	URL  string
 	Path string
-	Err  error
+	// Version is the release the failed download was pinned to. Carried because
+	// it differs per platform: the Windows port versions independently.
+	Version string
+	Err     error
 }
 
 func (e *installError) Error() string { return e.Err.Error() }
 func (e *installError) Unwrap() error { return e.Err }
 
-// codexbarURL is the GitHub release download URL for a platform suffix.
+// codexbarURL is the upstream release download URL for a platform suffix.
 func codexbarURL(suffix string) string {
 	return fmt.Sprintf(
 		"https://github.com/steipete/CodexBar/releases/download/v%s/CodexBarCLI-v%s-%s.tar.gz",
 		pinnedVersion, pinnedVersion, suffix,
+	)
+}
+
+// winCodexbarURL is the Win-CodexBar release download URL. It keeps upstream's
+// CodexBarCLI-v<version>-<platform> naming, but ships a zip.
+func winCodexbarURL(suffix string) string {
+	return fmt.Sprintf(
+		"https://github.com/nesszer/Win-CodexBar/releases/download/v%s/CodexBarCLI-v%s-%s.zip",
+		winPinnedVersion, winPinnedVersion, suffix,
 	)
 }
 
@@ -104,15 +152,15 @@ func cacheRoot() string {
 	return filepath.Join(os.TempDir(), "kandev-provider-usage")
 }
 
-// binPath is where the pinned binary for this platform is cached. Including
-// the asset suffix prevents an artifact change at the same upstream version
-// (such as glibc to static musl) from reusing an incompatible cached binary.
+// binPath is where the pinned binary for this platform is cached. Including the
+// asset suffix prevents an artifact change at the same version (such as glibc to
+// static musl) from reusing an incompatible cached binary.
 func (d *downloader) binPath() string {
 	asset, ok := codexbarAssets[d.platform]
 	if !ok {
 		return filepath.Join(d.cacheDir, "codexbar", pinnedVersion, codexbarBinName)
 	}
-	return filepath.Join(d.cacheDir, "codexbar", pinnedVersion, asset.suffix, codexbarBinName)
+	return filepath.Join(d.cacheDir, "codexbar", asset.version, asset.suffix, asset.binName)
 }
 
 // ensure returns a path to a ready-to-run codexbar binary, downloading and
@@ -127,7 +175,7 @@ func (d *downloader) ensure(ctx context.Context) (string, error) {
 		}
 	}
 	bin := d.binPath()
-	if isExecutableFile(bin) {
+	if isRunnableFileForPlatform(bin, d.platform) {
 		return bin, nil
 	}
 	if err := d.install(ctx, asset, filepath.Dir(bin)); err != nil {
@@ -136,31 +184,105 @@ func (d *downloader) ensure(ctx context.Context) (string, error) {
 	return bin, nil
 }
 
-// install downloads the asset tarball, verifies its SHA-256, and atomically
-// extracts its whole contents into versionDir. The full tarball is kept (not
-// just the binary) because codexbar reads its sibling VERSION file to report its
-// own version; the executable is the member named codexbarBinName.
+// install downloads the asset archive, verifies its SHA-256, and atomically
+// extracts its whole contents into versionDir. The whole archive is kept (not
+// just the binary) because upstream codexbar reads its sibling VERSION file to
+// report its own version; the executable is the member named asset.binName.
 func (d *downloader) install(ctx context.Context, asset platformAsset, versionDir string) error {
-	url := codexbarURL(asset.suffix)
+	url, version := asset.url, asset.version
 	body, err := d.fetch(ctx, url)
 	if err != nil {
-		return &installError{Kind: installErrDownload, URL: url, Err: fmt.Errorf("downloading codexbar: %w", err)}
+		return &installError{Kind: installErrDownload, URL: url, Version: version, Err: fmt.Errorf("downloading codexbar: %w", err)}
 	}
 	defer body.Close()
 
 	raw, err := io.ReadAll(body)
 	if err != nil {
-		return &installError{Kind: installErrDownload, URL: url, Err: fmt.Errorf("reading codexbar download: %w", err)}
+		return &installError{Kind: installErrDownload, URL: url, Version: version, Err: fmt.Errorf("reading codexbar download: %w", err)}
 	}
 	if got := sha256Hex(raw); got != asset.sha256 {
 		return &installError{
-			Kind: installErrChecksum,
-			URL:  url,
-			Err:  fmt.Errorf("codexbar checksum mismatch: expected %s, got %s", asset.sha256, got),
+			Kind:    installErrChecksum,
+			URL:     url,
+			Version: version,
+			Err:     fmt.Errorf("codexbar checksum mismatch: expected %s, got %s", asset.sha256, got),
 		}
 	}
-	if err := extractTarGz(raw, versionDir, codexbarBinName); err != nil {
-		return &installError{Kind: installErrUnpack, URL: url, Path: versionDir, Err: err}
+	extract := extractTarGz
+	if asset.zipped {
+		extract = extractZip
+	}
+	if err := extract(raw, versionDir, asset.binName); err != nil {
+		return &installError{Kind: installErrUnpack, URL: url, Version: version, Path: versionDir, Err: err}
+	}
+	return nil
+}
+
+// extractZip unpacks a codexbar zip into destDir with the same contract as
+// extractTarGz. Win-CodexBar ships a single flat codexbar-cli.exe, but the whole
+// archive is kept for symmetry with the tarball path.
+func extractZip(zipped []byte, destDir, execName string) error {
+	zr, err := zip.NewReader(bytes.NewReader(zipped), int64(len(zipped)))
+	if err != nil {
+		return fmt.Errorf("opening codexbar zip: %w", err)
+	}
+	return publishExtraction(destDir, execName, "zip", func(tmp string) (bool, error) {
+		var foundExec bool
+		for _, f := range zr.File {
+			if f.FileInfo().IsDir() {
+				continue
+			}
+			base := filepath.Base(f.Name)
+			if base == "." || base == ".." || base == "" {
+				continue
+			}
+			rc, err := f.Open()
+			if err != nil {
+				return foundExec, fmt.Errorf("opening %s: %w", base, err)
+			}
+			data, err := io.ReadAll(rc)
+			rc.Close()
+			if err != nil {
+				return foundExec, fmt.Errorf("extracting %s: %w", base, err)
+			}
+			mode := os.FileMode(0o644)
+			if base == execName {
+				mode = 0o755
+				foundExec = true
+			}
+			if err := os.WriteFile(filepath.Join(tmp, base), data, mode); err != nil {
+				return foundExec, fmt.Errorf("writing %s: %w", base, err)
+			}
+		}
+		return foundExec, nil
+	})
+}
+
+// publishExtraction runs write into a temporary sibling of destDir and renames
+// it into place, so a partial download never looks installed. Errors when write
+// did not produce execName.
+func publishExtraction(destDir, execName, archive string, write func(tmp string) (bool, error)) error {
+	if err := os.MkdirAll(filepath.Dir(destDir), 0o755); err != nil {
+		return fmt.Errorf("creating cache dir: %w", err)
+	}
+	tmp := destDir + ".tmp-extract"
+	_ = os.RemoveAll(tmp)
+	if err := os.MkdirAll(tmp, 0o755); err != nil {
+		return fmt.Errorf("creating temp cache dir: %w", err)
+	}
+	defer os.RemoveAll(tmp)
+
+	foundExec, err := write(tmp)
+	if err != nil {
+		return err
+	}
+	if !foundExec {
+		return fmt.Errorf("%s not found in codexbar %s", execName, archive)
+	}
+
+	_ = os.RemoveAll(destDir)
+	if err := os.Rename(tmp, destDir); err != nil {
+		return fmt.Errorf("publishing codexbar: %w", err)
 	}
 	return nil
 }
@@ -176,29 +298,9 @@ func extractTarGz(tarGz []byte, destDir, execName string) error {
 	}
 	defer gz.Close()
 
-	if err := os.MkdirAll(filepath.Dir(destDir), 0o755); err != nil {
-		return fmt.Errorf("creating cache dir: %w", err)
-	}
-	tmp := destDir + ".tmp-extract"
-	_ = os.RemoveAll(tmp)
-	if err := os.MkdirAll(tmp, 0o755); err != nil {
-		return fmt.Errorf("creating temp cache dir: %w", err)
-	}
-	defer os.RemoveAll(tmp)
-
-	foundExec, err := writeTarMembers(tar.NewReader(gz), tmp, execName)
-	if err != nil {
-		return err
-	}
-	if !foundExec {
-		return fmt.Errorf("%s not found in codexbar tarball", execName)
-	}
-
-	_ = os.RemoveAll(destDir)
-	if err := os.Rename(tmp, destDir); err != nil {
-		return fmt.Errorf("publishing codexbar: %w", err)
-	}
-	return nil
+	return publishExtraction(destDir, execName, "tarball", func(tmp string) (bool, error) {
+		return writeTarMembers(tar.NewReader(gz), tmp, execName)
+	})
 }
 
 // writeTarMembers writes each regular file in tr into destDir (flattened by base
@@ -240,11 +342,22 @@ func sha256Hex(b []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// isExecutableFile reports whether path is a regular file with an executable bit.
-func isExecutableFile(path string) bool {
+// isRunnableFile reports whether path is a regular file this host would run.
+// It asks about the running OS, not about which asset was downloaded: Windows
+// carries no executable bit — Go reports mode 0666 for every file there,
+// including a .exe — so being a regular file is the whole test. Checking the bit
+// anyway would leave the cache permanently cold, re-downloading on every poll.
+func isRunnableFile(path string) bool {
+	return isRunnableFileForPlatform(path, runtime.GOOS)
+}
+
+func isRunnableFileForPlatform(path, platform string) bool {
 	info, err := os.Stat(path)
-	if err != nil || info.IsDir() {
+	if err != nil || !info.Mode().IsRegular() {
 		return false
+	}
+	if platform == "windows" || strings.HasPrefix(platform, "windows-") {
+		return true
 	}
 	return info.Mode()&0o111 != 0
 }

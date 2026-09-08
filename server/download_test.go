@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -42,11 +43,7 @@ func TestExtractTarGz(t *testing.T) {
 	require.NoError(t, extractTarGz(tarGz, dest, "CodexBarCLI"))
 
 	bin := filepath.Join(dest, "CodexBarCLI")
-	if runtime.GOOS != "windows" {
-		// Go reports mode 0666 for every file on Windows, so the exec bit the
-		// extractor sets is unobservable there. The download path is unix-only.
-		require.True(t, isExecutableFile(bin))
-	}
+	require.True(t, isRunnableFile(bin))
 	got, err := os.ReadFile(bin)
 	require.NoError(t, err)
 	require.Equal(t, "#!/bin/sh\necho hi\n", string(got))
@@ -81,21 +78,23 @@ func TestDownloaderEnsure_DownloadsVerifiesCaches(t *testing.T) {
 	}
 	// Point the pinned checksum at our synthetic tarball for this platform.
 	orig := codexbarAssets["linux-amd64"]
-	codexbarAssets["linux-amd64"] = platformAsset{suffix: orig.suffix, sha256: sha256Hex(tarGz)}
+	patched := orig
+	patched.sha256 = sha256Hex(tarGz)
+	codexbarAssets["linux-amd64"] = patched
 	t.Cleanup(func() { codexbarAssets["linux-amd64"] = orig })
 
 	bin, err := d.ensure(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, filepath.Join(d.cacheDir, "codexbar", pinnedVersion, orig.suffix, codexbarBinName), bin)
 	require.Equal(t, 1, calls)
+	require.True(t, isRunnableFile(bin))
+
 	if runtime.GOOS == "windows" {
-		// ensure()'s warm path stats for an exec bit Windows never reports, so the
-		// cache would never be reused here. codexbarAssets has no Windows entry:
-		// this path is unreachable on the platform, and only the assertions below
-		// depend on it.
+		// This case claims a unix platform, so the cache check looks for an exec
+		// bit — which a Windows filesystem cannot carry, whatever the extractor
+		// asked for. Reuse under Windows semantics is TestDownloaderEnsure_Windows.
 		return
 	}
-	require.True(t, isExecutableFile(bin))
 
 	// Second call is served from cache — no re-download.
 	bin2, err := d.ensure(context.Background())
@@ -135,7 +134,8 @@ func TestDownloaderEnsure_ChecksumMismatch(t *testing.T) {
 }
 
 func TestDownloaderEnsure_UnsupportedPlatform(t *testing.T) {
-	d := &downloader{cacheDir: t.TempDir(), platform: "windows-amd64", fetch: nil}
+	// Windows is supported now, so this needs a platform with no published CLI.
+	d := &downloader{cacheDir: t.TempDir(), platform: "linux-386", fetch: nil}
 	_, err := d.ensure(context.Background())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no prebuilt")
@@ -167,4 +167,97 @@ func TestDownloaderEnsure_FetchError(t *testing.T) {
 	require.ErrorAs(t, err, &ierr)
 	require.Equal(t, installErrDownload, ierr.Kind)
 	require.Contains(t, ierr.URL, "CodexBarCLI-v"+pinnedVersion, "hint names the asset that failed")
+}
+
+// makeZip builds a zip containing the given name->content members.
+func makeZip(t *testing.T, members map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, content := range members {
+		w, err := zw.Create(name)
+		require.NoError(t, err)
+		_, err = w.Write([]byte(content))
+		require.NoError(t, err)
+	}
+	require.NoError(t, zw.Close())
+	return buf.Bytes()
+}
+
+func TestExtractZip(t *testing.T) {
+	zipped := makeZip(t, map[string]string{winCodexbarBinName: "MZ fake exe"})
+	dest := filepath.Join(t.TempDir(), winPinnedVersion)
+	require.NoError(t, extractZip(zipped, dest, winCodexbarBinName))
+
+	bin := filepath.Join(dest, winCodexbarBinName)
+	got, err := os.ReadFile(bin)
+	require.NoError(t, err)
+	require.Equal(t, "MZ fake exe", string(got))
+	require.True(t, isRunnableFile(bin))
+}
+
+func TestExtractZip_Missing(t *testing.T) {
+	zipped := makeZip(t, map[string]string{"README.txt": "no binary here"})
+	dest := filepath.Join(t.TempDir(), winPinnedVersion)
+	err := extractZip(zipped, dest, winCodexbarBinName)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not found")
+	require.NoDirExists(t, dest, "partial extraction is not published")
+}
+
+// TestDownloaderEnsure_Windows covers the zip path end to end, including the
+// warm cache — the reuse Windows would never get if the cached binary were
+// checked for an executable bit the OS does not report.
+func TestDownloaderEnsure_Windows(t *testing.T) {
+	zipped := makeZip(t, map[string]string{winCodexbarBinName: "MZ fake exe"})
+
+	calls := 0
+	d := &downloader{
+		cacheDir: t.TempDir(),
+		platform: "windows-amd64",
+		fetch: func(_ context.Context, _ string) (io.ReadCloser, error) {
+			calls++
+			return io.NopCloser(bytes.NewReader(zipped)), nil
+		},
+	}
+	orig := codexbarAssets["windows-amd64"]
+	patched := orig
+	patched.sha256 = sha256Hex(zipped)
+	codexbarAssets["windows-amd64"] = patched
+	t.Cleanup(func() { codexbarAssets["windows-amd64"] = orig })
+
+	bin, err := d.ensure(context.Background())
+	require.NoError(t, err)
+	require.Equal(t,
+		filepath.Join(d.cacheDir, "codexbar", winPinnedVersion, orig.suffix, winCodexbarBinName), bin,
+		"the Windows cache path carries the port's own version")
+	require.Equal(t, 1, calls)
+	require.NoError(t, os.Chmod(bin, 0o644))
+
+	bin2, err := d.ensure(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, bin, bin2)
+	require.Equal(t, 1, calls, "cached binary is reused on Windows too")
+}
+
+// TestWindowsAssetPointsAtThePort pins the facts a reviewer would otherwise have
+// to take on trust: a different repository, its own version, and a zip.
+func TestWindowsAssetPointsAtThePort(t *testing.T) {
+	a := codexbarAssets["windows-amd64"]
+	require.True(t, a.zipped)
+	require.Equal(t, winCodexbarBinName, a.binName)
+	require.Equal(t, winPinnedVersion, a.version)
+	require.Equal(t,
+		"https://github.com/nesszer/Win-CodexBar/releases/download/v"+winPinnedVersion+
+			"/CodexBarCLI-v"+winPinnedVersion+"-windows-x64.zip", a.url)
+	require.NotEqual(t, pinnedVersion, winPinnedVersion,
+		"the port does not track upstream's version numbers")
+
+	// Upstream platforms keep the tarball contract.
+	for _, p := range []string{"linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64"} {
+		require.False(t, codexbarAssets[p].zipped, p)
+		require.Equal(t, codexbarBinName, codexbarAssets[p].binName, p)
+		require.Contains(t, codexbarAssets[p].url, "steipete/CodexBar", p)
+		require.Contains(t, codexbarAssets[p].url, ".tar.gz", p)
+	}
 }

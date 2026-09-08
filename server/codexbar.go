@@ -126,24 +126,24 @@ func downloadHint(err *installError) string {
 	switch err.Kind {
 	case installErrUnsupported:
 		return fmt.Sprintf(
-			"codexbar publishes macOS and Linux CLI builds only, so nothing can be downloaded here. "+
+			"No prebuilt codexbar CLI is published for this platform, so nothing can be downloaded here. "+
 				"Install codexbar yourself and set its full path in %s.", settingName)
 	case installErrDownload:
 		if errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Sprintf(
 				"The one-time download of codexbar v%s ran out of time and was discarded. It retries on the next "+
 					"refresh — press re-check. If this host can't reach github.com, install codexbar yourself and "+
-					"set its path in %s.", pinnedVersion, settingName)
+					"set its path in %s.", err.Version, settingName)
 		}
 		return fmt.Sprintf(
 			"The one-time download of codexbar v%s from %s failed. Check this host's outbound access to "+
 				"github.com (proxy, firewall, air-gapped install), then press re-check — or install codexbar "+
-				"yourself and set its path in %s.", pinnedVersion, downloadTarget(err), settingName)
+				"yourself and set its path in %s.", err.Version, downloadTarget(err), settingName)
 	case installErrChecksum:
 		return fmt.Sprintf(
 			"The downloaded archive didn't match the SHA-256 pinned for codexbar v%s, so it was discarded "+
 				"instead of run. Press re-check to retry; if it keeps failing, install codexbar yourself and set "+
-				"its path in %s.", pinnedVersion, settingName)
+				"its path in %s.", err.Version, settingName)
 	case installErrUnpack:
 		return fmt.Sprintf(
 			"The download couldn't be unpacked into %s. Check that directory's permissions and free space, "+
