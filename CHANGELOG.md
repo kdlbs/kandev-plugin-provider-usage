@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0] - 2026-09-08
+
+### Changed
+
+- feat: download the codexbar CLI on Windows too, so nothing has to be installed by hand (#20) (b06482a)
+
+
 ## [0.5.0] - 2026-08-31
 
 ### Changed
