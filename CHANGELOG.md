@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0] - 2026-09-09
+
+### Changed
+
+- feat: show Codex manual reset credits (#22) (3b48b18)
+
+
 ## [0.6.0] - 2026-09-08
 
 ### Changed

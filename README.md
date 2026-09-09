@@ -163,7 +163,7 @@ make package         # tarball for all 5 supported platforms
 Install the tarball via Settings → Plugins → Install plugin (upload), or:
 
 ```sh
-curl -F package=@kandev-provider-usage-0.6.0.tar.gz \
+curl -F package=@kandev-provider-usage-0.7.0.tar.gz \
   http://localhost:8080/api/plugins/install
 ```
 
