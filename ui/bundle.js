@@ -377,6 +377,57 @@ function providerIndex(providers, provider) {
   return -1;
 }
 
+// Manual resets are an inventory, separate from scheduled quota resets. Filter
+// at render time too: an available credit can expire between backend polls.
+function resetCreditsPanel(h, provider) {
+  var data = provider.provider === "codex" && provider.reset_credits;
+  if (!data) return null;
+  var now = Date.now();
+  var inventory = data.credits || [];
+  function expiryTime(credit) {
+    var ms = credit.expires_at ? new Date(credit.expires_at).getTime() : NaN;
+    return isFinite(ms) ? ms : Infinity;
+  }
+  var available = inventory.filter(function (credit) {
+    return credit.status === "available" && expiryTime(credit) > now;
+  }).sort(function (a, b) { return expiryTime(a) - expiryTime(b); });
+  // Use inventory when present, falling back to the provider's count/summary
+  // when it reports availability without the individual credit details.
+  var count = inventory.length ? available.length : data.available_count;
+  var summary = typeof count === "number" ? count + " available" : data.summary;
+  if (!summary) return null;
+
+  function expiry(at, next) {
+    if (!at || !isFinite(new Date(at).getTime())) return h("span", null, "Expiry not reported");
+    return h(
+      "time",
+      { dateTime: at, title: new Date(at).toLocaleString() },
+      fmtReset({ reset_at: at }).replace(/^resets/, next ? "Next expires" : "Expires"),
+    );
+  }
+
+  return h(
+    "section",
+    { "aria-label": "Manual resets", style: { display: "flex", flexDirection: "column", gap: "6px", fontVariantNumeric: "tabular-nums" } },
+    h(
+      "div",
+      { style: { display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "12px", flexWrap: "wrap" } },
+      h("span", { style: { fontWeight: 700, fontSize: "13px" } }, "Manual resets"),
+      h("span", { style: { fontWeight: 600, fontSize: "11px", opacity: 0.9 } }, summary),
+    ),
+    available.length
+      ? h(
+          "ul",
+          { style: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "3px", fontSize: "11px", opacity: 0.6 } },
+          available.map(function (credit, i) { return h("li", { key: i }, expiry(credit.expires_at, false)); }),
+        )
+      : null,
+    !inventory.length && data.next_expires_at && new Date(data.next_expires_at).getTime() > now
+      ? h("div", { style: { fontSize: "11px", opacity: 0.6 } }, expiry(data.next_expires_at, true))
+      : null,
+  );
+}
+
 // ---- one provider's panel (name + plan + updated, then window bars) --------
 function providerPanel(host, p, warn, high, generatedAt, reload, isCurrent) {
   var h = host.jsx;
@@ -420,6 +471,7 @@ function providerPanel(host, p, warn, high, generatedAt, reload, isCurrent) {
       : p.detail
         ? null
         : h("div", { style: { fontSize: "12px", opacity: 0.55 } }, "No rate-limit windows reported."),
+    resetCreditsPanel(h, p),
     // Augment consumption + pace, sober, below the bar.
     p.detail
       ? h(
@@ -904,6 +956,7 @@ function statusMeterDrawerRow(host, usage, warn, high) {
         usageText + (detail.reset ? " · " + detail.reset : ""),
       ),
       detail.window ? statusMeterTrack(h, detail, warn, high) : null,
+      resetCreditsPanel(h, usage),
     ),
   );
 }

@@ -7,10 +7,10 @@ function bundleSource() {
   return readFileSync(new URL("../ui/bundle.js", import.meta.url), "utf8");
 }
 
-function statusMeterHelpers() {
+function statusMeterHelpers(now) {
   const sandbox = {
     window: { registerKandevPlugin() {} },
-    Date,
+    Date: now == null ? Date : class extends Date { static now() { return now; } },
     Math,
     String,
     isFinite,
@@ -25,7 +25,9 @@ function statusMeterHelpers() {
       " statusMeterProviders: typeof statusMeterProviders === 'function' ? statusMeterProviders : null," +
       " statusMeterDetail: typeof statusMeterDetail === 'function' ? statusMeterDetail : null," +
       " statusMeterBarItem: typeof statusMeterBarItem === 'function' ? statusMeterBarItem : null," +
+      " statusMeterDrawerRow: statusMeterDrawerRow," +
       " providerIcon: typeof providerIcon === 'function' ? providerIcon : null," +
+      " providerPanel: providerPanel," +
       " tabStrip: typeof tabStrip === 'function' ? tabStrip : null," +
       " readTopBarProviderPreference: typeof readTopBarProviderPreference === 'function' ? readTopBarProviderPreference : null," +
       " saveTopBarProviderPreference: typeof saveTopBarProviderPreference === 'function' ? saveTopBarProviderPreference : null," +
@@ -182,6 +184,77 @@ function renderedText(node) {
   if (typeof node !== "object") return String(node);
   return renderedText(node.children);
 }
+
+const resetCreditNow = Date.parse("2026-09-09T12:00:00Z");
+
+function codexPanel(resetCredits, now = resetCreditNow) {
+  const { providerPanel } = statusMeterHelpers(now);
+  return providerPanel({ jsx: element }, {
+    provider: "codex",
+    windows: [{ label: "5-hour", utilization_pct: 42, reset_at: "2026-09-09T15:00:00Z" }],
+    reset_credits: resetCredits,
+  }, 75, 90, "2026-09-09T12:00:00Z", () => {}, true);
+}
+
+test("Codex panel shows available manual resets and sorted expirations", () => {
+  const text = renderedText(codexPanel({
+    available_count: 5,
+    credits: [
+      { status: "available", expires_at: "2026-09-12T12:00:00Z" },
+      { status: "redeemed", expires_at: "2026-09-11T12:00:00Z" },
+      { status: "available", expires_at: "2026-09-08T12:00:00Z" },
+      { status: "available" },
+      { status: "available", expires_at: "2026-09-10T12:00:00Z" },
+      { status: "unknown", expires_at: "2026-09-15T12:00:00Z" },
+    ],
+  }));
+  assert.match(text, /Manual resets/);
+  assert.match(text, /3 available/);
+  assert.match(text, /Expires in 1d 0h.*Expires in 3d 0h.*Expiry not reported/);
+  assert.doesNotMatch(text, /Expires in 2d|Expires in 6d|expires now/i);
+  assert.match(text, /42% usedresets in 3h 0m/, "quota countdown stays separate");
+});
+
+test("Codex panel distinguishes absent reset data from zero and count-only reports", () => {
+  assert.doesNotMatch(renderedText(codexPanel()), /Manual resets/);
+  assert.match(renderedText(codexPanel({ available_count: 0 })), /Manual resets0 available/);
+  const text = renderedText(codexPanel({ available_count: 2 }));
+  assert.match(text, /Manual resets2 available/);
+  assert.doesNotMatch(text, /Expires|Expiry/, "no invented expirations for a summary-only report");
+});
+
+test("Codex panel stops counting a credit at its expiry between polls", () => {
+  const resetCredits = {
+    available_count: 1,
+    credits: [{ status: "available", expires_at: "2026-09-09T13:00:00Z" }],
+  };
+  assert.match(renderedText(codexPanel(resetCredits)), /1 available.*Expires in 1h 0m/);
+  const text = renderedText(codexPanel(resetCredits, Date.parse("2026-09-09T13:00:00Z")));
+  assert.match(text, /Manual resets0 available/);
+  assert.doesNotMatch(text, /Expires/);
+});
+
+test("Codex panel renders Windows reset summary with next expiry", () => {
+  const text = renderedText(codexPanel({
+    summary: "2 reset credits available",
+    next_expires_at: "2026-09-10T12:00:00Z",
+  }));
+  assert.match(text, /Manual resets2 reset credits availableNext expires in 1d 0h/);
+  assert.doesNotMatch(text, /0% used/);
+});
+
+test("phone Status drawer includes Codex manual reset details", () => {
+  const { statusMeterDrawerRow } = statusMeterHelpers(resetCreditNow);
+  const row = statusMeterDrawerRow({ jsx: element }, {
+    provider: "codex",
+    windows: [{ label: "weekly", utilization_pct: 42 }],
+    reset_credits: {
+      available_count: 1,
+      credits: [{ status: "available", expires_at: "2026-09-10T12:00:00Z" }],
+    },
+  }, 75, 90);
+  assert.match(renderedText(row), /Manual resets1 availableExpires in 1d 0h/);
+});
 
 test("status-bar item renders percentage, meter, or both literally", () => {
   const { statusMeterBarItem } = statusMeterHelpers();
