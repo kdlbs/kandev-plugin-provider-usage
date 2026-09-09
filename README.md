@@ -52,10 +52,12 @@ manifest's `config_schema` and grouped by source:
   ("48% in reserve").
 - **Codex manual resets**: the provider panel and phone Status drawer show
   available reset credits separately from the scheduled quota countdowns.
-  When CodexBar supplies an inventory, every available credit's expiry is
-  listed soonest first; redeemed, expired, and unknown-status credits are
-  excluded. Credits without an expiry show "Expiry not reported". Count-only
-  reports stay count-only; Win-CodexBar supplies a summary and the next expiry.
+  A compact summary shows the available count and nearest expiry. Click, tap,
+  or use the keyboard to expand the inventory, sorted soonest first, with
+  calendar dates and exact local timestamps. Redeemed, expired, and
+  unknown-status credits are excluded. Credits without an expiry show
+  "Expiry not reported". Count-only reports stay count-only; Win-CodexBar
+  supplies a summary and the next expiry.
   Missing reset data leaves the section hidden, while a reported zero is shown
   as zero. This is display-only; the plugin does not redeem credits.
 - **Augment** is a special case: codexbar can't read it off macOS, so it's

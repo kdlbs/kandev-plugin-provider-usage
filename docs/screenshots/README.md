@@ -12,13 +12,21 @@ actual plugin host. Playwright replayed the normalized live webhook response in
 the browser; this was not a packaged-plugin installation. The existing Kandev
 instance's plugin configuration and settings were left unchanged.
 
-- `codex-manual-resets-light.png`: desktop status-bar hover panel, light theme.
-- `codex-manual-resets-dark.png`: desktop status-bar hover panel, dark theme.
-- `codex-manual-resets-mobile.png`: provider row in the phone Status drawer.
+- `codex-manual-resets-light.png`: collapsed desktop summary, light theme.
+- `codex-manual-resets-dark.png`: collapsed desktop summary, dark theme.
+- `codex-manual-resets-mobile.png`: collapsed provider row in the phone Status drawer.
+- `codex-manual-resets-light-expanded.png`: expanded desktop inventory, light theme.
+- `codex-manual-resets-dark-expanded.png`: expanded desktop inventory, dark theme.
+- `codex-manual-resets-mobile-expanded.png`: expanded reset details after scrolling
+  the phone Status drawer so every expiry is visible.
 
 Chromium used a 1440 × 1000 desktop viewport and a 390 × 844 touch viewport,
 both at 2× device scale. Captures are cropped to the relevant panel or row.
-Browser assertions checked the three-credit count, every exact expiry timestamp,
-ascending expiry order, and absence of horizontal overflow in all three views.
+Browser assertions checked the three-credit count and nearest expiry while
+collapsed; every exact local timestamp and ascending expiry order when expanded;
+and absence of horizontal overflow in both states. Enter and Space opened and
+closed the desktop disclosure; tapping did the same on the phone. The summary
+has a 44 px tap target. The phone provider icon stays aligned with its name, and
+the expanded inventory is reachable through the drawer's normal scrolling.
 All assertions passed without browser errors. Credentials, account identifiers,
 and raw CodexBar output are not included.

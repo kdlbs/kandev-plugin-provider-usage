@@ -27,12 +27,20 @@ var TOPBAR_CSS =
   "#provider-usage-topbar[data-provider-usage-mode=icon]{width:28px}" +
   "@media (max-width:639px){#provider-usage-topbar{height:44px;min-height:44px}" +
   "#provider-usage-topbar[data-provider-usage-mode=icon]{width:44px}}";
+var RESET_CREDITS_CSS =
+  ".provider-reset-credits summary{list-style:none;cursor:pointer;border-radius:4px}" +
+  ".provider-reset-credits summary::-webkit-details-marker{display:none}" +
+  ".provider-reset-credits summary:hover{background:var(--muted)}" +
+  ".provider-reset-credits summary:focus-visible{outline:2px solid var(--ring);outline-offset:3px}" +
+  ".provider-reset-credits .provider-reset-chevron{transition:transform 150ms ease-out}" +
+  ".provider-reset-credits details[open] .provider-reset-chevron{transform:rotate(180deg)}" +
+  "@media (prefers-reduced-motion:reduce){.provider-reset-credits .provider-reset-chevron{transition:none}}";
 
 function injectTopbarStyles() {
   if (typeof document === "undefined" || document.getElementById(TOPBAR_STYLE_ID)) return;
   var style = document.createElement("style");
   style.id = TOPBAR_STYLE_ID;
-  style.textContent = TOPBAR_CSS;
+  style.textContent = TOPBAR_CSS + RESET_CREDITS_CSS;
   document.head.appendChild(style);
 }
 
@@ -377,6 +385,21 @@ function providerIndex(providers, provider) {
   return -1;
 }
 
+// Long-lived credits need calendar dates, not day-and-hour ticking counters.
+// Keep the exact local timestamp available in the expanded inventory as well.
+function resetCreditExpiry(at, now) {
+  var date = new Date(at || "");
+  var ms = date.getTime() - now;
+  if (!isFinite(ms) || ms <= 0) return null;
+  var unit = ms >= 86400000 ? "day" : ms >= 3600000 ? "hour" : "minute";
+  var value = Math.floor(ms / (unit === "day" ? 86400000 : unit === "hour" ? 3600000 : 60000));
+  var relative = value ? value + " " + unit + (value === 1 ? "" : "s") : "under 1 minute";
+  return {
+    label: date.toLocaleDateString(undefined, { month: "short", day: "numeric" }) + " · " + relative,
+    exact: date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "long" }),
+  };
+}
+
 // Manual resets are an inventory, separate from scheduled quota resets. Filter
 // at render time too: an available credit can expire between backend polls.
 function resetCreditsPanel(h, provider) {
@@ -397,34 +420,64 @@ function resetCreditsPanel(h, provider) {
   var summary = typeof count === "number" ? count + " available" : data.summary;
   if (!summary) return null;
 
-  function expiry(at, next) {
-    if (!at || !isFinite(new Date(at).getTime())) return h("span", null, "Expiry not reported");
-    return h(
-      "time",
-      { dateTime: at, title: new Date(at).toLocaleString() },
-      fmtReset({ reset_at: at }).replace(/^resets/, next ? "Next expires" : "Expires"),
-    );
+  var entries = available;
+  if (!inventory.length && count !== 0 && resetCreditExpiry(data.next_expires_at, now)) {
+    entries = [{ expires_at: data.next_expires_at }];
   }
-
-  return h(
-    "section",
-    { "aria-label": "Manual resets", style: { display: "flex", flexDirection: "column", gap: "6px", fontVariantNumeric: "tabular-nums" } },
+  var nearest = entries.length && resetCreditExpiry(entries[0].expires_at, now);
+  var heading = h(
+    entries.length ? "summary" : "div",
+    { style: { display: "flex", alignItems: "center", gap: "8px", minHeight: entries.length ? "44px" : "28px" } },
     h(
-      "div",
-      { style: { display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "12px", flexWrap: "wrap" } },
-      h("span", { style: { fontWeight: 700, fontSize: "13px" } }, "Manual resets"),
-      h("span", { style: { fontWeight: 600, fontSize: "11px", opacity: 0.9 } }, summary),
+      "span",
+      { style: { display: "flex", flexDirection: "column", gap: "3px", flex: 1, minWidth: 0 } },
+      h(
+        "span",
+        { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+        h("span", { style: { fontWeight: 500, fontSize: "12px" } }, "Manual resets"),
+        h("span", { style: { fontWeight: 500, fontSize: "10px", padding: "1px 6px", borderRadius: "999px", background: "var(--muted)" } }, summary),
+      ),
+      entries.length
+        ? h("span", { style: { color: "var(--muted-foreground)" } }, nearest ? "Next expires " + nearest.label : "Expiry not reported")
+        : null,
     ),
-    available.length
+    entries.length
       ? h(
-          "ul",
-          { style: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "3px", fontSize: "11px", opacity: 0.6 } },
-          available.map(function (credit, i) { return h("li", { key: i }, expiry(credit.expires_at, false)); }),
+          "svg",
+          { className: "provider-reset-chevron", width: 12, height: 12, viewBox: "0 0 12 12", fill: "none", stroke: "currentColor", strokeWidth: 1.5, "aria-hidden": "true", focusable: false, style: { flex: "0 0 auto", color: "var(--muted-foreground)" } },
+          h("path", { d: "m3 4.5 3 3 3-3", strokeLinecap: "round", strokeLinejoin: "round" }),
         )
       : null,
-    !inventory.length && data.next_expires_at && new Date(data.next_expires_at).getTime() > now
-      ? h("div", { style: { fontSize: "11px", opacity: 0.6 } }, expiry(data.next_expires_at, true))
-      : null,
+  );
+  return h(
+    "section",
+    { className: "provider-reset-credits", "aria-label": "Manual resets", style: { borderTop: "1px solid var(--border)", paddingTop: "6px", color: "var(--foreground)", fontSize: "11px", lineHeight: 1.5, fontVariantNumeric: "tabular-nums" } },
+    entries.length
+      ? h(
+          "details",
+          null,
+          heading,
+          h(
+            "ul",
+            { "aria-label": "Reset credit expirations", style: { listStyle: "none", margin: 0, padding: "8px 0 2px", display: "flex", flexDirection: "column", gap: "8px" } },
+            entries.map(function (credit, i) {
+              var expiry = resetCreditExpiry(credit.expires_at, now);
+              return h(
+                "li",
+                { key: i },
+                expiry
+                  ? h(
+                      "time",
+                      { dateTime: credit.expires_at, title: expiry.exact, style: { display: "flex", flexDirection: "column", gap: "1px" } },
+                      h("span", null, expiry.label),
+                      h("span", { style: { color: "var(--muted-foreground)", fontSize: "10px" } }, expiry.exact),
+                    )
+                  : h("span", { style: { color: "var(--muted-foreground)" } }, "Expiry not reported"),
+              );
+            }),
+          ),
+        )
+      : heading,
   );
 }
 
@@ -935,7 +988,7 @@ function statusMeterDrawerRow(host, usage, warn, high) {
       key: usage.provider,
       role: "group",
       "aria-label": title,
-      className: "flex w-full min-w-0 items-center gap-3",
+      className: "flex w-full min-w-0 items-start gap-3",
       style: { minHeight: "44px", userSelect: "none", WebkitUserSelect: "none" },
     },
     providerIcon(h, usage.provider, 18, providerLabel(usage.provider)),
