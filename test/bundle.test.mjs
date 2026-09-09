@@ -7,10 +7,10 @@ function bundleSource() {
   return readFileSync(new URL("../ui/bundle.js", import.meta.url), "utf8");
 }
 
-function statusMeterHelpers() {
+function statusMeterHelpers(now) {
   const sandbox = {
     window: { registerKandevPlugin() {} },
-    Date,
+    Date: now == null ? Date : class extends Date { static now() { return now; } },
     Math,
     String,
     isFinite,
@@ -25,7 +25,9 @@ function statusMeterHelpers() {
       " statusMeterProviders: typeof statusMeterProviders === 'function' ? statusMeterProviders : null," +
       " statusMeterDetail: typeof statusMeterDetail === 'function' ? statusMeterDetail : null," +
       " statusMeterBarItem: typeof statusMeterBarItem === 'function' ? statusMeterBarItem : null," +
+      " statusMeterDrawerRow: statusMeterDrawerRow," +
       " providerIcon: typeof providerIcon === 'function' ? providerIcon : null," +
+      " providerPanel: providerPanel," +
       " tabStrip: typeof tabStrip === 'function' ? tabStrip : null," +
       " readTopBarProviderPreference: typeof readTopBarProviderPreference === 'function' ? readTopBarProviderPreference : null," +
       " saveTopBarProviderPreference: typeof saveTopBarProviderPreference === 'function' ? saveTopBarProviderPreference : null," +
@@ -182,6 +184,155 @@ function renderedText(node) {
   if (typeof node !== "object") return String(node);
   return renderedText(node.children);
 }
+
+const resetCreditNow = Date.parse("2026-09-09T12:00:00Z");
+
+function codexPanel(resetCredits, now = resetCreditNow) {
+  const { providerPanel } = statusMeterHelpers(now);
+  return providerPanel({ jsx: element }, {
+    provider: "codex",
+    windows: [{ label: "5-hour", utilization_pct: 42, reset_at: "2026-09-09T15:00:00Z" }],
+    reset_credits: resetCredits,
+  }, 75, 90, "2026-09-09T12:00:00Z", () => {}, true);
+}
+
+test("Codex panel shows available manual resets and sorted expirations", () => {
+  const panel = codexPanel({
+    available_count: 5,
+    credits: [
+      { status: "available", expires_at: "2026-09-12T12:00:00Z" },
+      { status: "redeemed", expires_at: "2026-09-11T12:00:00Z" },
+      { status: "available", expires_at: "2026-09-08T12:00:00Z" },
+      { status: "available" },
+      { status: "available", expires_at: "2026-09-10T12:00:00Z" },
+      { status: "unknown", expires_at: "2026-09-15T12:00:00Z" },
+    ],
+  });
+  const text = renderedText(panel);
+  assert.match(text, /Manual resets/);
+  assert.match(text, /3 available/);
+  const list = everyElement(panel, (node) => node.type === "ul")[0];
+  const expiries = everyElement(list, (node) => node.type === "time");
+  assert.deepEqual(expiries.map((node) => node.props.dateTime), [
+    "2026-09-10T12:00:00Z", "2026-09-12T12:00:00Z",
+  ]);
+  assert.match(renderedText(list), /1 day.*3 days.*Expiry not reported/);
+  assert.match(text, /42% usedresets in 3h 0m/, "quota countdown stays separate");
+});
+
+test("Codex panel distinguishes absent reset data from zero and count-only reports", () => {
+  assert.doesNotMatch(renderedText(codexPanel()), /Manual resets/);
+  assert.match(renderedText(codexPanel({ available_count: 0 })), /Manual resets0 available/);
+  const text = renderedText(codexPanel({ available_count: 2 }));
+  assert.match(text, /Manual resets2 available/);
+  assert.doesNotMatch(text, /Expires|Expiry/, "no invented expirations for a summary-only report");
+  for (const available_count of [0, 2]) {
+    assert.equal(everyElement(codexPanel({ available_count }), (node) => node.type === "details").length, 0,
+      "no empty disclosure when only a count is known");
+  }
+});
+
+test("Codex panel stops counting a credit at its expiry between polls", () => {
+  const resetCredits = {
+    available_count: 1,
+    credits: [{ status: "available", expires_at: "2026-09-09T13:00:00Z" }],
+  };
+  assert.match(renderedText(codexPanel(resetCredits)), /1 available.*Next expires.*1 hour/);
+  const text = renderedText(codexPanel(resetCredits, Date.parse("2026-09-09T13:00:00Z")));
+  assert.match(text, /Manual resets0 available/);
+  assert.doesNotMatch(text, /Expires/);
+});
+
+test("Codex panel renders Windows reset summary with next expiry", () => {
+  const text = renderedText(codexPanel({
+    summary: "2 reset credits available",
+    next_expires_at: "2026-09-10T12:00:00Z",
+  }));
+  assert.match(text, /Manual resets2 reset credits availableNext expires.*1 day/);
+  assert.doesNotMatch(text, /0% used/);
+});
+
+test("phone Status drawer includes Codex manual reset details", () => {
+  const { statusMeterDrawerRow } = statusMeterHelpers(resetCreditNow);
+  const row = statusMeterDrawerRow({ jsx: element }, {
+    provider: "codex",
+    windows: [{ label: "weekly", utilization_pct: 42 }],
+    reset_credits: {
+      available_count: 1,
+      credits: [{ status: "available", expires_at: "2026-09-10T12:00:00Z" }],
+    },
+  }, 75, 90);
+  assert.match(renderedText(row), /Manual resets1 availableNext expires.*1 day/);
+  assert.match(row.props.className, /items-start/, "provider icon stays aligned with the provider name");
+});
+
+test("manual resets keep count and nearest expiry in a collapsed native disclosure", () => {
+  const panel = codexPanel({
+    available_count: 2,
+    credits: [
+      { status: "available", expires_at: "2026-10-05T12:00:00Z" },
+      { status: "available", expires_at: "2026-09-21T12:00:00Z" },
+    ],
+  });
+  const disclosure = everyElement(panel, (node) => node.type === "details")[0];
+  assert.ok(disclosure, "native disclosure provides keyboard/touch semantics");
+  assert.ok(!disclosure.props.open, "inventory starts collapsed");
+  const summary = everyElement(disclosure, (node) => node.type === "summary")[0];
+  assert.ok(summary, "summary remains visible when the inventory is collapsed");
+  assert.match(renderedText(summary), /Manual resets2 availableNext expires.*12 days/);
+  assert.doesNotMatch(renderedText(summary), /26 days/);
+  assert.equal(summary.props.style.minHeight, "44px", "entire summary is a phone-sized tap target");
+  const list = everyElement(disclosure, (node) => node.type === "ul")[0];
+  assert.equal(everyElement(list, (node) => node.type === "li").length, 2);
+  assert.match(renderedText(list), /12 days.*26 days/);
+});
+
+test("manual reset details expose localized dates and exact timestamps without granular day countdowns", () => {
+  const at = "2026-10-05T04:20:13Z";
+  const panel = codexPanel({ credits: [{ status: "available", expires_at: at }] });
+  const list = everyElement(panel, (node) => node.type === "ul")[0];
+  const time = everyElement(list, (node) => node.type === "time")[0];
+  const date = new Date(at);
+  const short = date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const exact = date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "long" });
+  assert.equal(time.props.dateTime, at);
+  assert.ok(renderedText(list).includes(short), "calendar date is visible");
+  assert.ok(renderedText(list).includes(exact), "exact local timestamp is visible on touch too");
+  assert.match(renderedText(list), /25 days/);
+  assert.doesNotMatch(renderedText(list), /25d|16h|Expires in/);
+});
+
+test("manual reset summary uses hours or minutes for imminent expiry", () => {
+  for (const [at, expected] of [
+    ["2026-09-09T14:30:00Z", /2 hours/],
+    ["2026-09-09T12:15:00Z", /15 minutes/],
+    ["2026-09-09T12:01:00Z", /1 minute/],
+    ["2026-09-09T12:00:30Z", /under 1 minute/],
+  ]) {
+    const panel = codexPanel({ credits: [{ status: "available", expires_at: at }] });
+    const summary = everyElement(panel, (node) => node.type === "summary")[0];
+    assert.ok(summary);
+    assert.match(renderedText(summary), expected);
+  }
+});
+
+test("manual reset disclosure stays honest when every expiry is unknown", () => {
+  const panel = codexPanel({ credits: [{ status: "available" }, { status: "available", expires_at: "invalid" }] });
+  const summary = everyElement(panel, (node) => node.type === "summary")[0];
+  assert.ok(summary);
+  assert.match(renderedText(summary), /2 availableExpiry not reported/);
+  assert.doesNotMatch(renderedText(summary), /Next expires/);
+  assert.equal(everyElement(panel, (node) => node.type === "li").length, 2);
+  assert.equal(everyElement(panel, (node) => node.type === "time").length, 0);
+});
+
+test("manual reset disclosure has scoped focus and reduced-motion styles", () => {
+  const styles = topbarStyleText();
+  assert.match(styles, /\.provider-reset-credits summary:focus-visible[^}]*outline:/);
+  assert.match(styles, /\.provider-reset-credits summary::-webkit-details-marker[^}]*display:none/);
+  assert.match(styles, /\.provider-reset-credits details\[open\][^}]*transform:rotate\(180deg\)/);
+  assert.match(styles, /@media \(prefers-reduced-motion:reduce\)[\s\S]*transition:none/);
+});
 
 test("status-bar item renders percentage, meter, or both literally", () => {
   const { statusMeterBarItem } = statusMeterHelpers();

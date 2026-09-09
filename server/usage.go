@@ -45,11 +45,12 @@ type ProviderUsage struct {
 	Detail string `json:"detail,omitempty"`
 	// DetailExtra is a sober sub-line under Detail — e.g. Augment's per-day
 	// average and projected month-end total.
-	DetailExtra string    `json:"detail_extra,omitempty"`
-	FetchedAt   time.Time `json:"fetched_at"`
-	Source      string    `json:"source,omitempty"` // codexbar source: oauth/web/cli/...
-	PacePrime   *Pace     `json:"pace_primary,omitempty"`
-	PaceSec     *Pace     `json:"pace_secondary,omitempty"`
+	DetailExtra  string        `json:"detail_extra,omitempty"`
+	FetchedAt    time.Time     `json:"fetched_at"`
+	Source       string        `json:"source,omitempty"` // codexbar source: oauth/web/cli/...
+	PacePrime    *Pace         `json:"pace_primary,omitempty"`
+	PaceSec      *Pace         `json:"pace_secondary,omitempty"`
+	ResetCredits *ResetCredits `json:"reset_credits,omitempty"`
 }
 
 // --- codexbar JSON wire types (subset of `codexbar usage --format json`) ------
@@ -95,13 +96,14 @@ func (e *cbError) UnmarshalJSON(data []byte) error {
 }
 
 type cbUsage struct {
-	Primary     *cbWindow   `json:"primary"`
-	Secondary   *cbWindow   `json:"secondary"`
-	Tertiary    *cbWindow   `json:"tertiary"`
-	Extra       []cbExtra   `json:"extraRateWindows"`
-	LoginMethod string      `json:"loginMethod"`
-	Identity    *cbIdentity `json:"identity"`
-	UpdatedAt   string      `json:"updatedAt"`
+	Primary      *cbWindow       `json:"primary"`
+	Secondary    *cbWindow       `json:"secondary"`
+	Tertiary     *cbWindow       `json:"tertiary"`
+	Extra        []cbExtra       `json:"extraRateWindows"`
+	LoginMethod  string          `json:"loginMethod"`
+	Identity     *cbIdentity     `json:"identity"`
+	UpdatedAt    string          `json:"updatedAt"`
+	ResetCredits json.RawMessage `json:"codexResetCredits"`
 }
 
 // UnmarshalJSON fills the fields the port spells with underscores. It carries no
@@ -113,9 +115,10 @@ func (u *cbUsage) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	var snake struct {
-		Extra       []cbExtra `json:"extra_rate_windows"`
-		LoginMethod string    `json:"login_method"`
-		UpdatedAt   string    `json:"updated_at"`
+		Extra        []cbExtra       `json:"extra_rate_windows"`
+		LoginMethod  string          `json:"login_method"`
+		UpdatedAt    string          `json:"updated_at"`
+		ResetCredits json.RawMessage `json:"codex_reset_credits"`
 	}
 	// Best-effort: a wrongly-typed key here was simply skipped before these
 	// spellings were known, and must stay non-fatal — failing the document would
@@ -129,6 +132,9 @@ func (u *cbUsage) UnmarshalJSON(data []byte) error {
 	}
 	if u.UpdatedAt == "" {
 		u.UpdatedAt = snake.UpdatedAt
+	}
+	if len(u.ResetCredits) == 0 {
+		u.ResetCredits = snake.ResetCredits
 	}
 	return nil
 }
@@ -211,8 +217,11 @@ func (e cbEntry) toProviderUsage(now time.Time) *ProviderUsage {
 		Provider:  e.Provider,
 		Source:    e.Source,
 		Plan:      e.Usage.planName(),
-		Windows:   e.Usage.windows(),
+		Windows:   e.Usage.windows(e.Provider),
 		FetchedAt: parseTimeOr(e.Usage.UpdatedAt, now),
+	}
+	if e.Provider == "codex" {
+		pu.ResetCredits = e.Usage.resetCredits()
 	}
 	if e.Pace != nil {
 		pu.PacePrime = e.Pace.Primary.toPace()
@@ -230,7 +239,7 @@ func (u *cbUsage) planName() string {
 
 // windows flattens primary/secondary/tertiary + extra windows into the canonical
 // ordered list, skipping any that codexbar left nil.
-func (u *cbUsage) windows() []UtilizationWindow {
+func (u *cbUsage) windows(provider string) []UtilizationWindow {
 	out := make([]UtilizationWindow, 0, 3+len(u.Extra))
 	for i, w := range []*cbWindow{u.Primary, u.Secondary, u.Tertiary} {
 		if w == nil {
@@ -241,6 +250,9 @@ func (u *cbUsage) windows() []UtilizationWindow {
 	for _, ex := range u.Extra {
 		if ex.Window == nil {
 			continue
+		}
+		if provider == "codex" && ex.ID == codexResetCreditsWindowID {
+			continue // shown as manual resets, not a utilization percentage
 		}
 		label := ex.Title
 		if label == "" {
