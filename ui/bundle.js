@@ -1,7 +1,9 @@
 // Provider Usage — kandev plugin UI bundle.
 //
 // Hand-written, NO-BUILD plain-JS ES module (shared host React via host.jsx —
-// never bundles its own React). Registers three components:
+// never bundles its own React). Registers four components:
+//   • "main-top-bar" — the same toolbar on Home/Kanban, Tasks and Threads;
+//     in the mobile listing menu, tap to expand an inline provider panel.
 //   • "chat-top-bar" — a gauge in the session top bar that, on hover, opens a
 //     panel cycling through every provider's subscription utilization. The last
 //     provider selected in that panel is kept as a client-side preference.
@@ -26,7 +28,11 @@ var TOPBAR_CSS =
   "#provider-usage-topbar{height:28px;min-height:28px}" +
   "#provider-usage-topbar[data-provider-usage-mode=icon]{width:28px}" +
   "@media (max-width:639px){#provider-usage-topbar{height:44px;min-height:44px}" +
-  "#provider-usage-topbar[data-provider-usage-mode=icon]{width:44px}}";
+  "#provider-usage-topbar[data-provider-usage-mode=icon]{width:44px}}" +
+  ".provider-usage-menu button{min-height:44px!important;min-width:44px!important}" +
+  // Match the host utility layer so its important square-button rules can be overridden.
+  "@layer utilities{.provider-usage-menu #provider-usage-topbar{width:auto!important;padding:0 8px!important;align-self:flex-start}" +
+  ".provider-usage-menu #provider-usage-topbar[data-provider-usage-mode=pill]{min-width:72px!important}}";
 var RESET_CREDITS_CSS =
   ".provider-reset-credits summary{list-style:none;cursor:pointer;border-radius:4px}" +
   ".provider-reset-credits summary::-webkit-details-marker{display:none}" +
@@ -662,7 +668,7 @@ function panelBody(host, state, index, setIndex, reload, topBarSelection) {
   );
 }
 
-// ---- the chat-top-bar component -------------------------------------------
+// ---- the shared and chat top-bar component -------------------------------------------
 // Self-contained hover panel: its own open state and a position:fixed panel
 // (anchored to the trigger's rect) so it works regardless of whether the slot
 // sits inside a Radix TooltipProvider, and escapes any overflow clipping on the
@@ -684,6 +690,7 @@ function makeTopBarStatus(host) {
 
   return function TopBarUsage(props) {
     var ctx = (props && props.slotProps) || {};
+    var mobileMenu = ctx.presentation === "mobile";
     var stateHook = React.useState({ loading: false, data: null, error: null });
     var state = stateHook[0];
     var setState = stateHook[1];
@@ -699,6 +706,7 @@ function makeTopBarStatus(host) {
     var loadedForRef = React.useRef(null);
     var wrapRef = React.useRef(null);
     var closeTimer = React.useRef(null);
+    var generation = React.useRef(0);
 
     // fetchOverview reads the overview webhook. backendRefresh forces the server
     // to re-run codexbar (expensive); silent skips the loading flash and keeps
@@ -706,6 +714,7 @@ function makeTopBarStatus(host) {
     function fetchOverview(opts) {
       opts = opts || {};
       var active = ctx.activeSessionId || "";
+      var requestGeneration = generation.current;
       loadedForRef.current = active;
       if (!opts.silent) {
         setState(function (s) { return { loading: true, data: opts.backendRefresh ? s.data : null, error: null }; });
@@ -720,9 +729,11 @@ function makeTopBarStatus(host) {
         .fetch(qs)
         .then(function (r) { return r.json(); })
         .then(function (data) {
+          if (generation.current !== requestGeneration) return;
           setState({ loading: false, data: data, error: null });
         })
         .catch(function (err) {
+          if (generation.current !== requestGeneration) return;
           if (opts.silent) return; // keep the last good render on a transient poll failure
           setState({ loading: false, data: null, error: String(err && err.message ? err.message : err) });
         });
@@ -734,7 +745,11 @@ function makeTopBarStatus(host) {
       fetchOverview({ backendRefresh: force });
     }
 
-    React.useEffect(function () { loadedForRef.current = null; load(false); }, [ctx.activeSessionId]);
+    React.useEffect(function () {
+      loadedForRef.current = null;
+      load(false);
+      return function () { generation.current++; cancelClose(); };
+    }, [ctx.activeSessionId, ctx.taskId]);
 
     // Keep the pill / open panel in step with the backend poller by silently
     // re-reading the warm snapshot on an interval.
@@ -769,7 +784,13 @@ function makeTopBarStatus(host) {
 
     return h(
       "div",
-      { ref: wrapRef, style: { display: "inline-flex" }, onMouseEnter: openNow, onMouseLeave: scheduleClose },
+      {
+        ref: wrapRef,
+        className: mobileMenu ? "provider-usage-menu" : undefined,
+        style: mobileMenu ? { display: "inline-flex", flexDirection: "column", maxWidth: "100%" } : { display: "inline-flex" },
+        onMouseEnter: mobileMenu ? undefined : openNow,
+        onMouseLeave: mobileMenu ? undefined : scheduleClose,
+      },
       h(
         ui.Button,
         {
@@ -780,7 +801,8 @@ function makeTopBarStatus(host) {
           size: "sm",
           className: (pill ? "h-6 gap-1.5 px-2 " : "h-6 w-6 px-0 ") + "rounded-md text-xs font-medium text-muted-foreground hover:text-foreground",
           "aria-label": "Provider usage",
-          onFocus: openNow,
+          "aria-expanded": open,
+          onFocus: mobileMenu ? undefined : openNow,
           onClick: function () { if (open) { setOpen(false); } else { openNow(); } },
         },
         pill || gaugeIcon(h, 14),
@@ -789,9 +811,10 @@ function makeTopBarStatus(host) {
         ? h(
             "div",
             {
-              onMouseEnter: cancelClose,
-              onMouseLeave: scheduleClose,
-              style: { position: "fixed", top: pos.top + "px", left: pos.left + "px", zIndex: 9999, paddingTop: "8px" },
+              onMouseEnter: mobileMenu ? undefined : cancelClose,
+              onMouseLeave: mobileMenu ? undefined : scheduleClose,
+              // Stay inside the mobile menu's scroll/focus containment; its drawer is transformed.
+              style: mobileMenu ? { paddingTop: "8px" } : { position: "fixed", top: pos.top + "px", left: pos.left + "px", zIndex: 9999, paddingTop: "8px" },
             },
             h(
               ui.Card,
@@ -1499,6 +1522,7 @@ function makeSettingsStatus(host) {
 window.registerKandevPlugin("kandev-provider-usage", {
   initialize: function (registry, host) {
     injectTopbarStyles();
+    registry.registerComponent("main-top-bar", makeTopBarStatus(host));
     registry.registerComponent("chat-top-bar", makeTopBarStatus(host));
     registry.registerComponent("app-status-bar-right", makeAppStatusBarUsage(host));
     registry.registerComponent("plugin-settings", makeSettingsStatus(host));
