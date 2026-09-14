@@ -32,7 +32,7 @@ function mount(slot = "main-top-bar", slotProps, saved = "") {
   const host = {
     React, jsx: (type, props, ...children) => ({ type, props: props || {}, children }),
     ui: { Button: "button", Card: "article" },
-    api: { fetch(url) { return new Promise((resolve, reject) => requests.push({ url, resolve: data => resolve({ json: () => data }), reject })); } },
+    api: { fetch(url, init) { return new Promise((resolve, reject) => requests.push({ url, init, resolve: (data, ok = true) => resolve({ ok, json: () => Promise.resolve(data) }), reject })); } },
   };
   vm.runInNewContext(readFileSync(new URL("../ui/bundle.js", import.meta.url), "utf8"), {
     window: { registerKandevPlugin(_id, plugin) { definition = plugin; },
@@ -159,3 +159,43 @@ test("changing toolbar context discards stale responses and replaces the poll ti
   app.unmount();
   assert.equal(app.intervals.size, 0);
 });
+
+for (const fails of [false, true]) {
+  test(`settings update uses POST, keeps status visible and reports ${fails ? "failure" : "success"}`, async () => {
+    const app = mount("plugin-settings");
+    const data = { ...snapshot, codexbar: { installed: true, version: "0.45.2", source: "download", command: "/old/CodexBarCLI" } };
+    app.render(); app.requests[0].resolve(data); await flush();
+    const update = nodes(app.render(), n => n.type === "button" && text(n) === "Update CodexBar")[0];
+    assert.ok(update);
+    update.props.onClick();
+    assert.equal(app.requests.at(-1).url, "webhooks/update");
+    assert.equal(app.requests.at(-1).init.method, "POST");
+    assert.match(text(app.render()), /Updating/);
+    assert.match(text(app.render()), /0.45.2/);
+    assert.ok(nodes(app.render(), n => n.type === "button").every(n => n.props.disabled));
+    // A timer poll must not clear the busy state or start another request.
+    const count = app.requests.length;
+    [...app.intervals.values()][0]();
+    assert.equal(app.requests.length, count);
+    if (fails) {
+      app.requests.at(-1).resolve({ error: "checksum mismatch" }, false); await flush();
+      assert.match(text(app.render()), /checksum mismatch/);
+      assert.match(text(app.render()), /0.45.2/);
+    } else {
+      app.requests.at(-1).resolve({ codexbar: { ...data.codexbar, version: "0.60.2", command: "/new/CodexBarCLI" }, message: "CodexBar is up to date (0.60.2)." }); await flush();
+      assert.match(text(app.render()), /0.60.2/);
+      assert.match(text(app.render()), /up to date/);
+    }
+    assert.equal(nodes(app.render(), n => n.type === "button" && text(n) === "Update CodexBar")[0].props.disabled, false);
+    app.unmount();
+  });
+}
+for (const source of ["settings", "path"]) {
+  test(`settings explains external ${source} updates`, async () => {
+    const app = mount("plugin-settings"); app.render();
+    app.requests[0].resolve({ ...snapshot, codexbar: { installed: true, source } }); await flush();
+    assert.equal(nodes(app.render(), n => n.type === "button" && text(n) === "Update CodexBar").length, 0);
+    assert.match(text(app.render()), /[Uu]pdate.*(externally|package manager)/);
+    app.unmount();
+  });
+}

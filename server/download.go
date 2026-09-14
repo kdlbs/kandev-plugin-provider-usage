@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 )
 
 // pinnedVersion is the upstream codexbar release the macOS and Linux
@@ -124,11 +125,12 @@ func winCodexbarURL(suffix string) string {
 // fetcher retrieves a URL's body — net/http in production, injected for tests.
 type fetcher func(ctx context.Context, url string) (io.ReadCloser, error)
 
-// downloader resolves and caches the pinned codexbar binary for the current
+// downloader resolves and caches managed CodexBar binaries for the current
 // platform under a per-user cache dir.
 type downloader struct {
-	cacheDir string // e.g. ~/.config/kandev-provider-usage
-	platform string // GOOS-GOARCH
+	mu       sync.Mutex // serializes cache installs and explicit updates
+	cacheDir string     // e.g. ~/.config/kandev-provider-usage
+	platform string     // GOOS-GOARCH
 	fetch    fetcher
 }
 
@@ -164,9 +166,14 @@ func (d *downloader) binPath() string {
 }
 
 // ensure returns a path to a ready-to-run codexbar binary, downloading and
-// caching the pinned per-platform build on first use. Cheap on the warm path
-// (a stat of the cached binary).
+// caching the pinned per-platform build on first use, unless the user has
+// selected an update. The warm path reads only local files.
 func (d *downloader) ensure(ctx context.Context) (string, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if bin := d.selectedBin(); bin != "" {
+		return bin, nil
+	}
 	asset, ok := codexbarAssets[d.platform]
 	if !ok {
 		return "", &installError{

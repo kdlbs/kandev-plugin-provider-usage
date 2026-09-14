@@ -1421,7 +1421,9 @@ function refreshGlyph(h) {
   );
 }
 
-function settingsStatusBody(host, state, reload) {
+function settingsStatusBody(host, state, reload, update, updateState) {
+  updateState = updateState || {};
+  var busy = !!(state.loading || updateState.loading);
   var h = host.jsx;
   var d = state.data;
 
@@ -1435,7 +1437,7 @@ function settingsStatusBody(host, state, reload) {
       {
         type: "button",
         onClick: reload,
-        disabled: state.loading,
+        disabled: busy,
         title: "Re-check integrations",
         style: {
           display: "inline-flex",
@@ -1444,9 +1446,9 @@ function settingsStatusBody(host, state, reload) {
           border: "none",
           background: "transparent",
           padding: 0,
-          cursor: state.loading ? "default" : "pointer",
+          cursor: busy ? "default" : "pointer",
           color: "inherit",
-          opacity: state.loading ? 0.45 : 0.7,
+          opacity: busy ? 0.45 : 0.7,
           fontSize: "11.5px",
         },
       },
@@ -1465,6 +1467,19 @@ function settingsStatusBody(host, state, reload) {
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "14px" } },
       codexbarRow(h, d.codexbar),
+      d.codexbar && d.codexbar.source === "download"
+        ? h("div", null,
+            h(host.ui.Button, { type: "button", onClick: update, disabled: busy },
+              updateState.loading ? "Updating CodexBar…" : "Update CodexBar"),
+            h("div", { style: { fontSize: "12px", opacity: 0.65, marginTop: "6px" } },
+              "Download and use the latest stable CLI release."))
+        : h("div", { style: { fontSize: "12px", opacity: 0.65 } },
+            d.codexbar && d.codexbar.source === "path"
+              ? "Update CodexBar with the package manager that installed it."
+              : "Update your configured CLI externally, or clear the CLI command to use managed downloads."),
+      updateState.error ? h("div", { role: "alert", style: { fontSize: "12px", color: COLOR.high } },
+        "Couldn't update CodexBar: " + updateState.error) : null,
+      updateState.message ? h("div", { role: "status", style: { fontSize: "12px" } }, updateState.message) : null,
       augmentRow(h, d),
     );
   }
@@ -1485,21 +1500,56 @@ function makeSettingsStatus(host) {
     var stateHook = React.useState({ loading: true, data: null, error: null });
     var state = stateHook[0];
     var setState = stateHook[1];
+    var updateHook = React.useState({ loading: false, error: null, message: null });
+    var updateState = updateHook[0], setUpdateState = updateHook[1];
+    var updating = React.useRef(false);
+    var requestGeneration = React.useRef(0);
 
     // force re-runs codexbar server-side; silent re-reads the warm snapshot
     // without a loading flash so the card refreshes in place.
     function fetchProviders(opts) {
       opts = opts || {};
+      if (updating.current) return;
+      var generation = requestGeneration.current;
       if (!opts.silent) {
         setState(function (s) { return { loading: true, data: s.data, error: null }; });
       }
       host.api
         .fetch("webhooks/providers" + (opts.backendRefresh ? "?refresh=1" : ""))
         .then(function (r) { return r.json(); })
-        .then(function (data) { setState({ loading: false, data: data, error: null }); })
+        .then(function (data) {
+          if (generation !== requestGeneration.current) return;
+          setState({ loading: false, data: data, error: null });
+        })
         .catch(function (err) {
-          if (opts.silent) return; // keep the last good render on a transient poll failure
+          if (generation !== requestGeneration.current || opts.silent) return; // keep the last good render on a transient poll failure
           setState({ loading: false, data: null, error: String(err && err.message ? err.message : err) });
+        });
+    }
+
+    function updateCodexbar() {
+      if (updating.current) return;
+      updating.current = true;
+      requestGeneration.current++;
+      setUpdateState({ loading: true, error: null, message: null });
+      host.api.fetch("webhooks/update", { method: "POST" })
+        .then(function (r) {
+          return r.json().then(function (data) {
+            if (!r.ok || data.error) throw new Error(data.error || "Update request failed");
+            return data;
+          });
+        })
+        .then(function (data) {
+          updating.current = false;
+          setState(function (s) {
+            return { loading: false, error: null, data: Object.assign({}, s.data, { codexbar: data.codexbar }) };
+          });
+          setUpdateState({ loading: false, error: null, message: data.message });
+          fetchProviders({ silent: true });
+        })
+        .catch(function (err) {
+          updating.current = false;
+          setUpdateState({ loading: false, error: String(err && err.message ? err.message : err), message: null });
         });
     }
 
@@ -1514,7 +1564,7 @@ function makeSettingsStatus(host) {
       return function () { clearInterval(id); };
     }, []);
 
-    return h(ui.Card, { style: { padding: "16px 18px" } }, settingsStatusBody(host, state, function () { load(true); }));
+    return h(ui.Card, { style: { padding: "16px 18px" } }, settingsStatusBody(host, state, function () { load(true); }, updateCodexbar, updateState));
   };
 }
 
