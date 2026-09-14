@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0] - 2026-09-14
+
+### Changed
+
+- feat: show provider usage in the shared top bar (#23) (c3838f1)
+
+
 ## [0.7.0] - 2026-09-09
 
 ### Changed
