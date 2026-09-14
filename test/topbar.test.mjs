@@ -199,3 +199,19 @@ for (const source of ["settings", "path"]) {
     app.unmount();
   });
 }
+
+for (const fails of [false, true]) {
+  test(`settings ignores update ${fails ? "failure" : "success"} after unmount`, async () => {
+    const app = mount("plugin-settings");
+    app.render();
+    app.requests[0].resolve({ ...snapshot, codexbar: { installed: true, source: "download" } }); await flush();
+    nodes(app.render(), n => n.type === "button" && text(n) === "Update CodexBar")[0].props.onClick();
+    app.unmount();
+    const writes = app.writes, requests = app.requests.length;
+    if (fails) app.requests.at(-1).reject(new Error("offline"));
+    else app.requests.at(-1).resolve({ codexbar: { installed: true, source: "download", version: "1.0.0" } });
+    await flush();
+    assert.equal(app.writes, writes, "no state writes after unmount");
+    assert.equal(app.requests.length, requests, "no providers request after unmount");
+  });
+}

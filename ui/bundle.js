@@ -1503,13 +1503,14 @@ function makeSettingsStatus(host) {
     var updateHook = React.useState({ loading: false, error: null, message: null });
     var updateState = updateHook[0], setUpdateState = updateHook[1];
     var updating = React.useRef(false);
+    var mounted = React.useRef(true);
     var requestGeneration = React.useRef(0);
 
     // force re-runs codexbar server-side; silent re-reads the warm snapshot
     // without a loading flash so the card refreshes in place.
     function fetchProviders(opts) {
       opts = opts || {};
-      if (updating.current) return;
+      if (!mounted.current || updating.current) return;
       var generation = requestGeneration.current;
       if (!opts.silent) {
         setState(function (s) { return { loading: true, data: s.data, error: null }; });
@@ -1528,9 +1529,10 @@ function makeSettingsStatus(host) {
     }
 
     function updateCodexbar() {
-      if (updating.current) return;
+      if (!mounted.current || updating.current) return;
       updating.current = true;
       requestGeneration.current++;
+      var generation = requestGeneration.current;
       setUpdateState({ loading: true, error: null, message: null });
       host.api.fetch("webhooks/update", { method: "POST" })
         .then(function (r) {
@@ -1540,6 +1542,7 @@ function makeSettingsStatus(host) {
           });
         })
         .then(function (data) {
+          if (!mounted.current || generation !== requestGeneration.current) return;
           updating.current = false;
           setState(function (s) {
             return { loading: false, error: null, data: Object.assign({}, s.data, { codexbar: data.codexbar }) };
@@ -1548,6 +1551,7 @@ function makeSettingsStatus(host) {
           fetchProviders({ silent: true });
         })
         .catch(function (err) {
+          if (!mounted.current || generation !== requestGeneration.current) return;
           updating.current = false;
           setUpdateState({ loading: false, error: String(err && err.message ? err.message : err), message: null });
         });
@@ -1555,7 +1559,14 @@ function makeSettingsStatus(host) {
 
     function load(force) { fetchProviders({ backendRefresh: force }); }
 
-    React.useEffect(function () { load(false); }, []);
+    React.useEffect(function () {
+      mounted.current = true;
+      load(false);
+      return function () {
+        mounted.current = false;
+        requestGeneration.current++;
+      };
+    }, []);
 
     // Reflect the backend poller's updates (Augment consumption included) while
     // the card stays open, by silently re-reading the warm snapshot.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,8 @@ import (
 
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
+
+var errUpdateBusy = errors.New("A provider refresh or CodexBar download is already running. Retry shortly.")
 
 var releaseVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 
@@ -93,7 +96,9 @@ func (d *downloader) selectedBin() string {
 // update installs alongside the active binary, probes it, then atomically
 // publishes the selection. Every failure leaves the previous selection intact.
 func (d *downloader) update(ctx context.Context, run runner) (InstallStatus, error) {
-	d.mu.Lock()
+	if !d.mu.TryLock() {
+		return InstallStatus{}, errUpdateBusy
+	}
 	defer d.mu.Unlock()
 	asset, err := d.latestAsset(ctx)
 	if err != nil {
@@ -140,19 +145,25 @@ func (p *plugin) updateWebhook(ctx context.Context, method string) *pluginsdk.We
 	if method != "POST" {
 		return jsonResponse(405, []byte(`{"error":"use POST to update CodexBar"}`))
 	}
+	updateCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
 	// Check provenance without triggering an initial install.
-	if p.configuredCommand(ctx) != "" {
+	if p.configuredCommand(updateCtx) != "" {
 		return jsonResponse(409, []byte(`{"error":"Update your configured CLI command externally, or clear it to use managed downloads."}`))
 	}
 	if _, err := p.lookPath("codexbar"); err == nil {
 		return jsonResponse(409, []byte(`{"error":"Update the CodexBar installation on PATH with its package manager."}`))
 	}
-	p.pollMu.Lock()
+	// Do not queue updates behind a potentially slow refresh or download.
+	if !p.pollMu.TryLock() {
+		return jsonResponse(409, marshalOr(map[string]string{"error": errUpdateBusy.Error()}, `{}`))
+	}
 	defer p.pollMu.Unlock()
-	updateCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
 	status, err := p.dl.update(updateCtx, p.run)
 	if err != nil {
+		if errors.Is(err, errUpdateBusy) {
+			return jsonResponse(409, marshalOr(map[string]string{"error": err.Error()}, `{}`))
+		}
 		return jsonResponse(502, marshalOr(map[string]string{"error": err.Error()}, `{}`))
 	}
 	// Expire the snapshot so the next read rebuilds with the new CLI.

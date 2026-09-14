@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/pkg/pluginsdk"
 	"github.com/stretchr/testify/require"
@@ -148,6 +149,35 @@ func TestUpdateRejectsExternalAndGet(t *testing.T) {
 				expected = 405
 			}
 			require.EqualValues(t, expected, resp.Status)
+		})
+	}
+}
+
+func TestUpdateDoesNotWaitForBusyWork(t *testing.T) {
+	for _, lock := range []string{"poll", "download"} {
+		t.Run(lock, func(t *testing.T) {
+			p := newTestPlugin(t, nil, nil, nil)
+			mu := &p.pollMu
+			if lock == "download" {
+				mu = &p.dl.mu
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			done := make(chan *pluginsdk.WebhookResponse, 1)
+			go func() {
+				r, _ := p.HandleWebhook(ctx, &pluginsdk.WebhookRequest{WebhookKey: "update", Method: "POST"})
+				done <- r
+			}()
+			select {
+			case r := <-done:
+				require.EqualValues(t, 409, r.Status)
+				require.Contains(t, string(r.Body), "Retry")
+			case <-time.After(time.Second):
+				cancel()
+				t.Fatal("update blocked behind busy work")
+			}
 		})
 	}
 }
