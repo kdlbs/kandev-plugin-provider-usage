@@ -20,7 +20,7 @@ build:
 
 test:
 	go test ./server/...
-	node --test test/bundle.test.mjs
+	node --test test/*.test.mjs
 	node --check ui/bundle.js
 
 fmt:

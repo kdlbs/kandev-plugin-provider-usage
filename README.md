@@ -2,16 +2,16 @@
 
 A [kandev](https://github.com/kdlbs/kandev) plugin that shows **subscription
 utilization** for your agent providers — how much of each rate-limit window
-(5-hour / weekly / monthly …) is used, with reset times — in the session top
-bar and, when enabled, Kandev's global status bar. Data comes from the
+(5-hour / weekly / monthly …) is used, with reset times — in the shared page-wide
+and session top bars and, when enabled, Kandev's global status bar. Data comes from the
 [codexbar](https://github.com/steipete/codexbar) CLI (covers ~60 providers:
 Claude, Codex/OpenAI, Gemini, Copilot, Cursor, Grok, OpenCode, …) plus
 Augment's own Analytics API.
 
 ## Screenshots
 
-A pill in the session top bar (`chat-top-bar` slot) shows the selected provider
-as an icon + %:
+A pill in the shared page-wide top bar (`main-top-bar` slot) and session top
+bar (`chat-top-bar` slot) shows the selected provider as an icon + %:
 
 ![Top-bar pill](https://raw.githubusercontent.com/kdlbs/kandev-plugin-provider-usage/0cbed6cfb38b0e642a26158392b71f44170e686d/topbar-pill.png)
 
@@ -34,11 +34,17 @@ manifest's `config_schema` and grouped by source:
 
 ## What it does
 
-- **Session top bar (default)**: a component in the `chat-top-bar` plugin slot
+- **Shared and session top bars (default)**: the same widget in `main-top-bar`
+  (Home/Kanban, Tasks, and Threads) and the existing `chat-top-bar` plugin slot
   (kandev ≥ [#1827](https://github.com/kdlbs/kandev/pull/1827)) — a pill for
   your selected provider (icon + %), each real brand mark rendered monochrome.
   Hover to open a panel that cycles through every provider; click to switch,
   and the selected tab is remembered locally.
+  The shared bar has no task or active session: it reads the same account-wide
+  snapshots and uses the saved provider, then the first available provider.
+  In a session, the current provider remains the fallback before the first
+  available one. On phones, open the listing menu and tap the pill to expand
+  usage inline; provider tabs and Refresh have 44 px minimum touch targets.
 - **Global status display (opt-in)**: `display_status_bar_mode` chooses `off`
   (default), `percentage`, `meter`, or `both`. The contribution in
   `app-status-bar-right` renders the selected compact presentation plus reset
@@ -116,8 +122,8 @@ Settings → Plugins → Provider Usage (generated from the manifest
 | `codexbar_command`          | Explicit codexbar command. Empty = auto-detect / auto-download.                                             |
 | `codexbar_poll_minutes`     | Background refresh interval (default 5, minimum 1).                                                          |
 | `codexbar_providers`        | Comma-separated provider ids to poll. Empty = curated local-credential set; `"all"` = full sweep (slower).  |
-| `display_pill_providers`    | Providers included in the optional global status display, comma-separated. Tokens: `current`, `all`, or explicit ids. Empty = current session's provider only. The session top-bar pill instead follows the locally remembered tab selection. |
-| `display_status_bar_mode`   | `off` (default) keeps usage in the session top bar only. `percentage` adds icon + percentage to global status; `meter` adds icon + meter without percentage; `both` adds meter + percentage. Enabled modes also appear in the phone Status drawer. Requires a Kandev host with app-status-bar slots. |
+| `display_pill_providers`    | Providers included in the optional global status display, comma-separated. Tokens: `current`, `all`, or explicit ids. Empty = current session's provider only. The top-bar pills instead follow the locally remembered tab selection. |
+| `display_status_bar_mode`   | `off` (default) keeps usage in the top bars only. `percentage` adds icon + percentage to global status; `meter` adds icon + meter without percentage; `both` adds meter + percentage. Enabled modes also appear in the phone Status drawer. Requires a Kandev host with app-status-bar slots. |
 | `display_threshold_warn`    | A window at/above this % turns amber (default 75).                                                            |
 | `display_threshold_high`    | A window at/above this % turns red/coral (default 90).                                                        |
 
@@ -146,8 +152,8 @@ blank pill explains itself without a trip to Settings.
   snapshot; webhooks serve that snapshot instantly.
 - `ui/bundle.js` — hand-written, no-build ES module using the shared host React
   instance and `host.ui` components, plus inlined real brand-mark SVGs
-  (monochrome). It registers the compatibility chat top-bar and opt-in global
-  status-right components, and only renders backend payloads.
+  (monochrome). It registers shared and compatibility chat top-bar, plugin
+  settings, and opt-in global status-right components, and only renders backend payloads.
 
 ## Develop
 

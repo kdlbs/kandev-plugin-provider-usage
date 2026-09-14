@@ -559,6 +559,28 @@ func TestHandleWebhook_Overview(t *testing.T) {
 	require.NotEmpty(t, report.Providers)
 }
 
+// A page-wide toolbar has workspace context but no task or active session.
+func TestHandleWebhook_OverviewWithoutSession(t *testing.T) {
+	var calls int32
+	p := newTestPlugin(t, codexbarConfig(nil), []pluginsdk.Session{session("unrelated", "Claude Code")}, perProviderRunner(&calls))
+	for _, query := range []string{"", "task_id=&active=", "task_id=&active=&refresh=1"} {
+		before := atomic.LoadInt32(&calls)
+		resp, err := p.HandleWebhook(context.Background(), webhookGet(webhookKeyOverview, query))
+		require.NoError(t, err)
+		require.Equal(t, int32(200), resp.Status)
+		var report OverviewReport
+		require.NoError(t, json.Unmarshal(resp.Body, &report))
+		require.Empty(t, report.CurrentProvider, "must not borrow an unrelated session")
+		require.Empty(t, report.PillProviders, "status-bar current selection stays unscoped")
+		require.NotEmpty(t, report.Providers, "toolbar can select from account snapshots")
+		if strings.Contains(query, "refresh=1") {
+			require.Greater(t, atomic.LoadInt32(&calls), before)
+		} else if before > 0 {
+			require.Equal(t, before, atomic.LoadInt32(&calls), "warm reads reuse the snapshot")
+		}
+	}
+}
+
 func TestOverviewPillProviders(t *testing.T) {
 	sessions := []pluginsdk.Session{session("kandev-sess", "Claude Code")}
 	byProvider := map[string][]byte{

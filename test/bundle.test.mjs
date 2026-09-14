@@ -523,3 +523,27 @@ test("hover panel repeats the codexbar failure reason", () => {
   assert.equal(codexbarProblem({ installed: false, error: "raw", hint: "do this" }), "do this");
   assert.equal(codexbarProblem({ installed: false, error: "raw" }), "raw", "falls back to the raw error");
 });
+
+test("repeated initialize/destroy removes shared styles without duplicating them", () => {
+  let plugin;
+  const styles = new Map();
+  const head = {
+    appendChild(style) { style.parentNode = head; styles.set(style.id, style); },
+    removeChild(style) { styles.delete(style.id); },
+  };
+  vm.runInNewContext(bundleSource(), {
+    window: { registerKandevPlugin(_id, definition) { plugin = definition; } },
+    document: { head, createElement: () => ({}), getElementById: id => styles.get(id) },
+  });
+  for (let cycle = 0; cycle < 2; cycle++) {
+    plugin.initialize({ registerComponent() {} }, {});
+    plugin.initialize({ registerComponent() {} }, {});
+    assert.equal(styles.size, 1);
+    plugin.destroy();
+    assert.equal(styles.size, 0);
+  }
+});
+
+test("mobile menu pill reserves room for icon and percentage despite host square-button sizing", () => {
+  assert.match(topbarStyleText(), /\.provider-usage-menu #provider-usage-topbar\[data-provider-usage-mode=pill\]\{min-width:72px!important\}/);
+});
