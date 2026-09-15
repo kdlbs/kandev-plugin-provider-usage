@@ -1619,7 +1619,7 @@ var SETTINGS_FIELDS = {
   augment_resource: { label: "Plan unit", default: "credits", options: [["credits", "Credits"], ["usd", "USD"]] },
   codexbar_poll_minutes: { label: "Refresh every (minutes)", type: "number", min: 1, default: 5 },
   display_status_bar_mode: { label: "Status bar", default: "off", options: [["off", "Off"], ["percentage", "Percentage"], ["meter", "Meter"], ["both", "Meter and percentage"]] },
-  display_pill_providers: { label: "Status bar providers", default: "", options: [["", "Current session"], ["current", "Current session"], ["all", "All providers"]] },
+  display_pill_providers: { label: "Status bar providers", default: "" },
   display_threshold_warn: { label: "Warning at (%)", type: "number", min: 0, max: 100, default: 75 },
   display_threshold_high: { label: "High usage at (%)", type: "number", min: 0, max: 100, default: 90 },
   codexbar_command: { label: "CLI path", hint: "Leave empty to find or download CodexBar automatically." },
@@ -1709,7 +1709,42 @@ function settingsProviders(data) {
   return Object.keys(found).sort(function (a, b) { return providerLabel(a).localeCompare(providerLabel(b)); }).map(function (id) { return found[id]; });
 }
 
+function statusProvidersField(host, key, value, change, disabled, providers) {
+  var h = host.jsx, id = "provider-setting-" + key;
+  var selected = settingsList(value).filter(function (item, i, list) { return list.indexOf(item) === i; });
+  if (!selected.length) selected = ["current"];
+  var options = [["current", "Current session"], ["all", "All providers"]];
+  providers.map(function (provider) { return provider.provider; }).concat(selected).forEach(function (provider) {
+    if (!options.some(function (option) { return option[0] === provider; })) options.push([provider, providerLabel(provider)]);
+  });
+  var all = selected.indexOf("all") >= 0;
+  var summary = all ? "All providers" : selected.map(function (provider) {
+    return provider === "current" ? "Current session" : providerLabel(provider);
+  }).join(", ");
+  return h("div", { key: key, style: { minWidth: 0 } },
+    h("div", { id: id + "-label", style: { fontWeight: 600, fontSize: "13px", marginBottom: "6px" } }, "Status bar providers"),
+    h("details", { id: id, style: { border: "1px solid var(--border)", borderRadius: "6px", background: "var(--background)", fontSize: "13px" } },
+      h("summary", { "aria-labelledby": id + "-label " + id + "-summary", "aria-disabled": disabled,
+        onClick: function (event) { if (disabled) event.preventDefault(); },
+        style: { padding: "12px 10px", minHeight: "44px", cursor: disabled ? "default" : "pointer", overflowWrap: "anywhere" },
+      }, h("span", { id: id + "-summary" }, summary)),
+      h("fieldset", { disabled: disabled, "aria-labelledby": id + "-label", style: { border: 0, margin: 0, padding: "0 10px 10px", display: "flex", flexDirection: "column", gap: "6px" } },
+        options.map(function (option) {
+          return h("label", { key: option[0], style: { display: "flex", alignItems: "center", gap: "8px", minHeight: "44px", overflowWrap: "anywhere" } },
+            h("input", { type: "checkbox", value: option[0], checked: all ? option[0] === "all" : selected.indexOf(option[0]) >= 0,
+              onChange: function (event) {
+                var next = all ? [] : selected.filter(function (provider) { return provider !== option[0]; });
+                if (event.target.checked) next = option[0] === "all" ? ["all"] : next.concat(option[0]);
+                change(key, next.join(","));
+              },
+            }), option[1]);
+        })),
+      h("p", { style: { margin: "0 10px 10px", fontSize: "12px", color: "var(--muted-foreground)" } }, "Choose several providers or All providers. With none selected, the current session is used.")),
+  );
+}
+
 function configurationField(host, key, value, change, disabled, providers) {
+  if (key === "display_pill_providers") return statusProvidersField(host, key, value, change, disabled, providers);
   var h = host.jsx, spec = SETTINGS_FIELDS[key], id = "provider-setting-" + key;
   var props = {
     id: id, value: spec.secret && value === SETTINGS_SECRET_MASK ? "" : value, disabled: disabled,
@@ -1717,10 +1752,6 @@ function configurationField(host, key, value, change, disabled, providers) {
     style: { width: "100%", minWidth: 0, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: "6px", background: "var(--background)", color: "inherit", font: "inherit", fontSize: "13px" },
   };
   var options = spec.options ? spec.options.slice() : null;
-  if (key === "display_pill_providers") {
-    options = options.filter(function (option) { return option[0] !== "current" || value === "current"; });
-    providers.forEach(function (provider) { options.push([provider.provider, providerLabel(provider.provider)]); });
-  }
   if (options && !options.some(function (option) { return option[0] === value; })) options.push([value, value.split(",").map(providerLabel).join(", ")]);
   var input = options
     ? h("select", props, options.map(function (option) { return h("option", { key: option[0], value: option[0] }, option[1]); }))
@@ -1801,7 +1832,7 @@ function settingsProviderDetails(host, provider, usage, failure, connection, pen
         providerWindows(h, usage, report && report.warn_threshold, report && report.high_threshold)) : null,
       cursorExtrasPanel(h, usage),
       resetCreditsPanel(h, usage),
-      usage.detail_warning ? h("p", { className: "provider-settings-notice" }, usage.detail_warning) : null,
+      usage.detail_warning && usage.provider !== "cursor" ? h("p", { className: "provider-settings-notice" }, usage.detail_warning) : null,
     ) : h("div", { className: "provider-settings-notice", "data-tone": connection.tone },
       h("strong", null, connection.summary), h("p", null, connection.hint)),
     h("div", { className: "provider-settings-metadata" },

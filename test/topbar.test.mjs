@@ -222,6 +222,73 @@ test("configuration save merges edited fields into latest settings and preserves
   app.unmount();
 });
 
+const statusProvider = (tree, id) => nodes(settingsInput(tree, "display_pill_providers"), n => n.type === "input" && n.props.value === id)[0];
+
+test("status provider checkboxes create and persist a subset without losing other settings", async () => {
+  const app = mount("plugin-settings");
+  const config = { display_status_bar_mode: "both", display_pill_providers: "all", cursor_cookie_header: "********" };
+  let tree = await loadSettings(app, snapshot, config);
+  assert.equal(statusProvider(tree, "all").props.checked, true);
+  statusProvider(tree, "claude").props.onChange({ target: { checked: true } });
+  statusProvider(app.render(), "codex").props.onChange({ target: { checked: true } });
+  tree = app.render();
+  assert.equal(statusProvider(tree, "all").props.checked, false);
+  assert.equal(statusProvider(tree, "claude").props.checked, true);
+  assert.equal(statusProvider(tree, "codex").props.checked, true);
+  saveSettings(tree).props.onClick();
+  app.requests.at(-1).resolve({ config: { ...config, augment_api_token: "********" } }); await flush();
+  const saved = JSON.parse(app.requests.at(-1).init.body).config;
+  assert.equal(saved.display_pill_providers, "claude,codex");
+  assert.equal(saved.cursor_cookie_header, "********");
+  assert.equal(saved.augment_api_token, "********");
+  app.requests.at(-1).resolve({ updated: true }); await flush();
+  statusProvider(app.render(), "claude").props.onChange({ target: { checked: false } });
+  nodes(app.render(), n => n.type === "button" && text(n) === "Discard changes")[0].props.onClick();
+  assert.equal(statusProvider(app.render(), "claude").props.checked, true);
+  app.unmount();
+  const reopened = mount("plugin-settings");
+  tree = await loadSettings(reopened, snapshot, saved);
+  assert.equal(statusProvider(tree, "claude").props.checked, true);
+  assert.equal(statusProvider(tree, "codex").props.checked, true);
+  reopened.unmount();
+});
+
+test("status provider choices retain undetected saved providers and support current and all", async () => {
+  const app = mount("plugin-settings");
+  const config = { display_status_bar_mode: "both", display_pill_providers: "amp,current,codex" };
+  let tree = await loadSettings(app, snapshot, config);
+  assert.equal(statusProvider(tree, "amp").props.checked, true);
+  assert.equal(statusProvider(tree, "current").props.checked, true);
+  statusProvider(tree, "claude").props.onChange({ target: { checked: true } });
+  saveSettings(app.render()).props.onClick();
+  app.requests.at(-1).resolve({ config }); await flush();
+  assert.equal(JSON.parse(app.requests.at(-1).init.body).config.display_pill_providers, "amp,current,codex,claude");
+  app.requests.at(-1).resolve({ updated: true }); await flush();
+  statusProvider(app.render(), "all").props.onChange({ target: { checked: true } });
+  tree = app.render();
+  assert.equal(statusProvider(tree, "all").props.checked, true);
+  assert.equal(statusProvider(tree, "codex").props.checked, false);
+  statusProvider(tree, "all").props.onChange({ target: { checked: false } });
+  tree = app.render();
+  assert.equal(statusProvider(tree, "current").props.checked, true);
+  saveSettings(tree).props.onClick();
+  app.requests.at(-1).resolve({ config }); await flush();
+  assert.equal(JSON.parse(app.requests.at(-1).init.body).config.display_pill_providers, undefined, "empty selection uses the existing current-session default");
+  app.unmount();
+});
+
+test("settings show Cursor warnings once while retaining other provider warnings", async () => {
+  const app = mount("plugin-settings");
+  const tree = await loadSettings(app, { providers: [
+    { provider: "cursor", windows: [], detail_warning: "Only selected-team usage is shown." },
+    { provider: "codex", windows: [], detail_warning: "Additional quota unavailable." },
+  ] });
+  for (const message of ["Only selected-team usage is shown.", "Additional quota unavailable."]) {
+    assert.equal(nodes(tree, n => n.type === "p" && text(n) === message).length, 1);
+  }
+  app.unmount();
+});
+
 test("settings reports save failures without losing drafts, and permits discarding them", async () => {
   const app = mount("plugin-settings");
   let tree = await loadSettings(app, snapshot);

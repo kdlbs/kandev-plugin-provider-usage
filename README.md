@@ -181,6 +181,9 @@ The remaining providers reuse their existing local sign-in. Paused connections
 retain their section so they can be enabled again.
 
 **Shared settings** holds the refresh interval and status-bar presentation.
+Expand **Status bar providers** to select several named providers, the current
+session, or all providers. With none selected, the current session is used.
+Existing selections remain editable even when a provider is not detected.
 Its **Advanced** disclosure contains usage color thresholds, the CLI path and
 CodexBar maintenance. **Save settings** applies edited fields while preserving
 other provider settings and masked credentials. **Discard changes** restores
