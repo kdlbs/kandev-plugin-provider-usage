@@ -185,6 +185,93 @@ function renderedText(node) {
   return renderedText(node.children);
 }
 
+const cursorDetailNow = Date.parse("2026-09-10T12:00:00Z");
+
+function cursorDetailFixture() {
+  return {
+    provider: "cursor", plan: "Cursor Ultra", fetched_at: "2026-09-10T12:00:00Z",
+    windows: [
+      { label: "Total Usage", utilization_pct: 27, reset_at: "2026-10-02T00:00:00Z" },
+      { label: "Auto Usage", utilization_pct: 2, scoped: true, reset_at: "2026-10-02T00:00:00Z" },
+      { label: "API Usage", utilization_pct: 100, scoped: true, reset_at: "2026-10-02T00:00:00Z" },
+    ],
+    extra_usage: { used: 364.04, currency: "USD" },
+  };
+}
+
+test("Cursor panel fills Total, Auto and API bars with usage and shows extra spend", () => {
+  const { providerPanel, statusMeterDetail } = statusMeterHelpers(cursorDetailNow);
+  const usage = cursorDetailFixture();
+  const panel = providerPanel({ jsx: element }, usage, 75, 90, usage.fetched_at, () => {}, false);
+  const text = renderedText(panel);
+  assert.match(text, /Total Usage.*27% used/);
+  assert.match(text, /Auto Usage.*2\.0% used/);
+  assert.match(text, /API Usage.*Limit reached.*100% used/);
+  assert.match(text, /Extra Usage.*\$364\.04 spent/);
+  const meters = everyElement(panel, (node) => node.props.role === "meter");
+  assert.deepEqual(meters.map((node) => node.props["aria-valuenow"]), [27, 2, 100]);
+  assert.deepEqual(meters.map((node) => node.props["aria-label"]), ["Total Usage used", "Auto Usage used", "API Usage used"]);
+  assert.deepEqual(meters.map((node) => node.children[0].props.style.width), ["27%", "2%", "100%"]);
+  assert.equal(statusMeterDetail(usage).pct, 27, "scoped API exhaustion must not replace the total in the compact pill");
+  assert.equal(everyElement(panel, (node) => node.type === "details").length, 0);
+});
+
+test("Cursor's single-window Enterprise response shows unknown metrics without inventing zeros", () => {
+  const { providerPanel } = statusMeterHelpers(cursorDetailNow);
+  const usage = { provider: "cursor", plan: "Cursor Enterprise", windows: [{ label: "Total Usage", utilization_pct: 2.6216666666666666 }] };
+  const panel = providerPanel({ jsx: element }, usage, 75, 90, "", () => {}, false);
+  const text = renderedText(panel);
+  assert.match(text, /2\.6% used/);
+  assert.match(text, /Auto UsageNot reported.*API UsageNot reported/);
+  assert.match(text, /Extra UsageNot reported/);
+  assert.doesNotMatch(text, /\$0|0% used/);
+  assert.equal(everyElement(panel, (node) => node.props.role === "meter").length, 1);
+});
+
+test("Cursor details preserve zero personal spend, label team spend, and show quota warnings", () => {
+  const { providerPanel } = statusMeterHelpers(cursorDetailNow);
+  const usage = cursorDetailFixture();
+  usage.extra_usage = { used: 0, limit: 250, currency: "USD" };
+  usage.detail_warning = "Detailed quotas unavailable; showing the available quota.";
+  let panel = providerPanel({ jsx: element }, usage, 75, 90, "", () => {}, false);
+  assert.match(renderedText(panel), /\$0\.00 spentLimit \$250\.00/);
+  assert.match(renderedText(panel), /Detailed quotas unavailable; showing the available quota/);
+  assert.equal(everyElement(panel, (node) => node.type === "details").length, 0);
+  usage.extra_usage = { used: 500, limit: 5000, currency: "USD", scope: "team" };
+  panel = providerPanel({ jsx: element }, usage, 75, 90, "", () => {}, false);
+  assert.match(renderedText(panel), /Extra Usage · team.*\$500\.00 spent.*shared across the team/);
+});
+
+test("Cursor detail data is present in the phone Status drawer too", () => {
+  const { statusMeterDrawerRow } = statusMeterHelpers(cursorDetailNow);
+  const row = statusMeterDrawerRow({ jsx: element }, cursorDetailFixture(), 75, 90);
+  assert.match(renderedText(row), /Total Usage.*27% used.*Auto Usage.*2\.0% used.*API Usage.*100% used.*Extra Usage/);
+  assert.equal(everyElement(row, (node) => node.type === "summary").length, 0);
+});
+
+test("Cursor selected team is visible in desktop and phone details", () => {
+  const { providerPanel, statusMeterDrawerRow } = statusMeterHelpers(cursorDetailNow);
+  const usage = { ...cursorDetailFixture(), team_id: "30677937", team_name: "Selected team" };
+  const panel = providerPanel({ jsx: element }, usage, 75, 90, "", () => {}, false);
+  const phone = statusMeterDrawerRow({ jsx: element }, usage, 75, 90);
+  assert.match(renderedText(panel), /Selected team · Team 30677937/);
+  assert.match(renderedText(phone), /Selected team · Team 30677937/);
+});
+
+test("Cursor team spend without a reported quota does not display a false zero percent", () => {
+  const { providerPanel, pillContent, statusMeterBarItem } = statusMeterHelpers(cursorDetailNow);
+  const usage = { provider: "cursor", team_id: "30677937", windows: [], extra_usage: { used: 12.34, currency: "USD" } };
+  const panel = providerPanel({ jsx: element }, usage, 75, 90, "", () => {}, false);
+  assert.match(renderedText(panel), /Total UsageNot reported.*Extra Usage\$12\.34 spent/);
+  for (const component of [
+    pillContent({ jsx: element }, { providers: [usage] }, "cursor"),
+    statusMeterBarItem({ jsx: element }, usage, 75, 90, "full", "both"),
+  ]) {
+    assert.doesNotMatch(renderedText(component), /0%/);
+    assert.match(renderedText(component), /—/);
+  }
+});
+
 const resetCreditNow = Date.parse("2026-09-09T12:00:00Z");
 
 function codexPanel(resetCredits, now = resetCreditNow) {

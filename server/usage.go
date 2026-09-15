@@ -21,7 +21,8 @@ type UtilizationWindow struct {
 	ResetDescription string `json:"reset_description,omitempty"`
 	// Scoped marks a narrow/extra window (e.g. codexbar's "Fable only") so the UI
 	// can exclude it from the at-a-glance peak while still listing it.
-	Scoped bool `json:"scoped,omitempty"`
+	Scoped bool   `json:"scoped,omitempty"`
+	Detail string `json:"detail,omitempty"` // e.g. included requests or a shared team allowance
 }
 
 // Pace carries codexbar's optional burn-rate summary for a window ("52% in
@@ -38,6 +39,8 @@ type Pace struct {
 type ProviderUsage struct {
 	Provider string              `json:"provider"`       // "claude", "codex", ...
 	Plan     string              `json:"plan,omitempty"` // e.g. "max", "pro", "free"
+	TeamID   string              `json:"team_id,omitempty"`
+	TeamName string              `json:"team_name,omitempty"`
 	Windows  []UtilizationWindow `json:"windows"`
 	// Detail is a human headline for providers whose usage isn't a rate-limit
 	// window percentage — e.g. Augment's raw monthly consumption ("959,232
@@ -45,12 +48,24 @@ type ProviderUsage struct {
 	Detail string `json:"detail,omitempty"`
 	// DetailExtra is a sober sub-line under Detail — e.g. Augment's per-day
 	// average and projected month-end total.
-	DetailExtra  string        `json:"detail_extra,omitempty"`
-	FetchedAt    time.Time     `json:"fetched_at"`
-	Source       string        `json:"source,omitempty"` // codexbar source: oauth/web/cli/...
-	PacePrime    *Pace         `json:"pace_primary,omitempty"`
-	PaceSec      *Pace         `json:"pace_secondary,omitempty"`
-	ResetCredits *ResetCredits `json:"reset_credits,omitempty"`
+	DetailExtra   string        `json:"detail_extra,omitempty"`
+	FetchedAt     time.Time     `json:"fetched_at"`
+	Source        string        `json:"source,omitempty"` // codexbar source: oauth/web/cli/...
+	PacePrime     *Pace         `json:"pace_primary,omitempty"`
+	PaceSec       *Pace         `json:"pace_secondary,omitempty"`
+	ResetCredits  *ResetCredits `json:"reset_credits,omitempty"`
+	ExtraUsage    *UsageSpend   `json:"extra_usage,omitempty"`
+	DetailWarning string        `json:"detail_warning,omitempty"`
+	// Used only to verify that optional Cursor details belong to this account.
+	accountID    string
+	accountEmail string
+}
+
+type UsageSpend struct {
+	Used     float64  `json:"used"`
+	Limit    *float64 `json:"limit,omitempty"`
+	Currency string   `json:"currency"`
+	Scope    string   `json:"scope,omitempty"` // "team" when this is shared spend
 }
 
 // --- codexbar JSON wire types (subset of `codexbar usage --format json`) ------
@@ -104,6 +119,8 @@ type cbUsage struct {
 	Identity     *cbIdentity     `json:"identity"`
 	UpdatedAt    string          `json:"updatedAt"`
 	ResetCredits json.RawMessage `json:"codexResetCredits"`
+	ProviderCost json.RawMessage `json:"providerCost"`
+	AccountEmail string          `json:"accountEmail"`
 }
 
 // UnmarshalJSON fills the fields the port spells with underscores. It carries no
@@ -119,6 +136,7 @@ func (u *cbUsage) UnmarshalJSON(data []byte) error {
 		LoginMethod  string          `json:"login_method"`
 		UpdatedAt    string          `json:"updated_at"`
 		ResetCredits json.RawMessage `json:"codex_reset_credits"`
+		AccountEmail string          `json:"account_email"`
 	}
 	// Best-effort: a wrongly-typed key here was simply skipped before these
 	// spellings were known, and must stay non-fatal — failing the document would
@@ -136,12 +154,17 @@ func (u *cbUsage) UnmarshalJSON(data []byte) error {
 	if len(u.ResetCredits) == 0 {
 		u.ResetCredits = snake.ResetCredits
 	}
+	if u.AccountEmail == "" {
+		u.AccountEmail = snake.AccountEmail
+	}
 	return nil
 }
 
 type cbIdentity struct {
-	ProviderID string `json:"providerID"`
-	PlanName   string `json:"planName"`
+	ProviderID   string `json:"providerID"`
+	PlanName     string `json:"planName"`
+	AccountID    string `json:"accountID"`
+	AccountEmail string `json:"accountEmail"`
 }
 
 type cbWindow struct {
@@ -223,6 +246,16 @@ func (e cbEntry) toProviderUsage(now time.Time) *ProviderUsage {
 	if e.Provider == "codex" {
 		pu.ResetCredits = e.Usage.resetCredits()
 	}
+	if e.Provider == "cursor" {
+		pu.accountEmail = e.Usage.AccountEmail
+		if e.Usage.Identity != nil {
+			pu.accountID = e.Usage.Identity.AccountID
+			if e.Usage.Identity.AccountEmail != "" {
+				pu.accountEmail = e.Usage.Identity.AccountEmail
+			}
+		}
+		pu.ExtraUsage = cursorProviderCost(e.Usage.ProviderCost)
+	}
 	if e.Pace != nil {
 		pu.PacePrime = e.Pace.Primary.toPace()
 		pu.PaceSec = e.Pace.Secondary.toPace()
@@ -245,7 +278,12 @@ func (u *cbUsage) windows(provider string) []UtilizationWindow {
 		if w == nil {
 			continue
 		}
-		out = append(out, w.toWindow(defaultWindowLabel(i, w.WindowMinutes)))
+		window := w.toWindow(defaultWindowLabel(i, w.WindowMinutes))
+		if provider == "cursor" {
+			window.Label = []string{"Total Usage", "Auto Usage", "API Usage"}[i]
+			window.Scoped = i > 0
+		}
+		out = append(out, window)
 	}
 	for _, ex := range u.Extra {
 		if ex.Window == nil {
