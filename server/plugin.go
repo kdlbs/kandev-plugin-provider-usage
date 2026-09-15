@@ -95,11 +95,13 @@ type plugin struct {
 	pluginsdk.UnimplementedPlugin
 
 	// Seams injected for tests; production values set in newPlugin.
-	run      runner
-	lookPath func(string) (string, error)
-	now      func() time.Time
-	dl       *downloader
-	httpPost jsonPoster // Augment Analytics API calls
+	run           runner
+	lookPath      func(string) (string, error)
+	now           func() time.Time
+	dl            *downloader
+	httpPost      jsonPoster // Augment Analytics API calls
+	cursor        *cursorClient
+	scanProviders func(map[string]any) []detectedProvider
 
 	// disablePoller keeps the background goroutine from starting in tests, so
 	// the snapshot is built synchronously by the webhook path instead.
@@ -108,12 +110,14 @@ type plugin struct {
 
 	// pollMu serializes snapshot rebuilds so the ticker and a manual refresh
 	// never run codexbar concurrently.
-	pollMu sync.Mutex
+	pollMu           sync.Mutex
+	cursorSettingsMu sync.Mutex
 
 	// mu guards the snapshot pointer and its timestamp.
-	mu         sync.Mutex
-	snapshot   *AllProvidersReport
-	snapshotAt time.Time
+	mu                      sync.Mutex
+	snapshot                *AllProvidersReport
+	snapshotAt              time.Time
+	cursorSelectionRevision uint64
 }
 
 var _ pluginsdk.Plugin = (*plugin)(nil)
@@ -139,6 +143,10 @@ func newPlugin() *plugin {
 		now:      time.Now,
 		dl:       newDownloader(),
 		httpPost: realJSONPost,
+		cursor:   newCursorClient(),
+		scanProviders: func(cfg map[string]any) []detectedProvider {
+			return append(scanLocalProviders(cfg), configuredCodexbarProviders()...)
+		},
 	}
 }
 
@@ -177,11 +185,25 @@ func (p *plugin) pollOnce(ctx context.Context, maxAge time.Duration) *AllProvide
 	}
 	runCtx, cancel := context.WithTimeout(ctx, reportTimeout)
 	defer cancel()
-	report := p.collectProviders(runCtx)
-	p.mu.Lock()
-	p.snapshot, p.snapshotAt = report, p.now()
-	p.mu.Unlock()
-	return report
+	for {
+		p.mu.Lock()
+		revision := p.cursorSelectionRevision
+		p.mu.Unlock()
+		report := p.collectProviders(runCtx)
+		p.mu.Lock()
+		if revision == p.cursorSelectionRevision {
+			p.snapshot, p.snapshotAt = report, p.now()
+			p.mu.Unlock()
+			return report
+		}
+		p.mu.Unlock()
+		// A team was saved while this poll was in flight. Never publish its
+		// old Cursor totals; rebuild using the selection that is now stored.
+		if runCtx.Err() != nil {
+			cursorUnavailable(report, errors.New("Cursor team changed. Refresh to load its usage."))
+			return report
+		}
+	}
 }
 
 func (p *plugin) currentSnapshot() (*AllProvidersReport, time.Time) {
@@ -211,6 +233,12 @@ func (p *plugin) HandleWebhook(ctx context.Context, req *pluginsdk.WebhookReques
 	refresh := query.Get("refresh") == "1"
 
 	switch req.WebhookKey {
+	case webhookKeyDiscovery:
+		return p.discoveryWebhook(ctx, req.Method), nil
+	case webhookKeyCursorTeams:
+		return p.cursorTeamsWebhook(ctx, req.Method), nil
+	case webhookKeyCursorTeam:
+		return p.cursorTeamWebhook(ctx, req), nil
 	case webhookKeyUpdate:
 		return p.updateWebhook(ctx, req.Method), nil
 	case webhookKeyStatus:
@@ -379,10 +407,11 @@ type ProviderError struct {
 // page: utilization for every provider that has usage, plus the ones codexbar
 // couldn't read, plus the codexbar install status for setup guidance.
 type AllProvidersReport struct {
-	GeneratedAt   string        `json:"generated_at"`
-	Codexbar      InstallStatus `json:"codexbar"`
-	WarnThreshold float64       `json:"warn_threshold"`
-	HighThreshold float64       `json:"high_threshold"`
+	DetectedProviders []detectedProvider `json:"detected_providers"`
+	GeneratedAt       string             `json:"generated_at"`
+	Codexbar          InstallStatus      `json:"codexbar"`
+	WarnThreshold     float64            `json:"warn_threshold"`
+	HighThreshold     float64            `json:"high_threshold"`
 	// StatusBarMode controls the optional global status contribution. It lives in
 	// the warm snapshot so every UI surface applies the same operator choice.
 	StatusBarMode string `json:"status_bar_mode"`
@@ -492,6 +521,7 @@ func (p *plugin) configuredList(ctx context.Context, key string) []string {
 // itself can't run, it degrades to a status-only report so the page can render
 // setup guidance.
 func (p *plugin) collectProviders(ctx context.Context) *AllProvidersReport {
+	cfg := p.config(ctx)
 	warn, high := p.configuredThresholds(ctx)
 	cmd := p.resolveCommand(ctx)
 	report := &AllProvidersReport{
@@ -503,6 +533,23 @@ func (p *plugin) collectProviders(ctx context.Context) *AllProvidersReport {
 		Providers:     []ProviderUsage{},
 		Unavailable:   []ProviderError{},
 	}
+	defer func() {
+		report.DetectedProviders = p.discoverProviders(cfg, report)
+		providers := report.Providers[:0]
+		for _, provider := range report.Providers {
+			if !providerDisabled(cfg, provider.Provider) {
+				providers = append(providers, provider)
+			}
+		}
+		report.Providers = providers
+		unavailable := report.Unavailable[:0]
+		for _, provider := range report.Unavailable {
+			if !providerDisabled(cfg, provider.Provider) {
+				unavailable = append(unavailable, provider)
+			}
+		}
+		report.Unavailable = unavailable
+	}()
 
 	// Probe once up front (a fast `--version`): this cleanly separates "codexbar
 	// is broken" (degraded report) from "a provider is unavailable" (listed).
@@ -526,8 +573,95 @@ func (p *plugin) collectProviders(ctx context.Context) *AllProvidersReport {
 			report.Providers = append(report.Providers, *u)
 		}
 	}
-	p.appendAugment(ctx, report)
+	// The two independent APIs share the report deadline, not each other's
+	// latency. Keep their mutable reports separate until both have completed.
+	var augment AllProvidersReport
+	var extras sync.WaitGroup
+	extras.Add(1)
+	go func() { defer extras.Done(); p.appendAugment(ctx, &augment) }()
+	p.enrichCursor(ctx, report)
+	extras.Wait()
+	report.Providers = append(report.Providers, augment.Providers...)
+	report.Unavailable = append(report.Unavailable, augment.Unavailable...)
 	return report
+}
+
+func (p *plugin) cursorUsage(ctx context.Context, base *ProviderUsage) (*ProviderUsage, error) {
+	ctx, cancel := context.WithTimeout(ctx, perProviderTimeout)
+	defer cancel()
+	cfg, err := p.cursorConfig(ctx)
+	if err != nil {
+		return nil, &cursorTeamSelectionError{err}
+	}
+	usage, err := p.cursor.fetch(ctx, cfg, base, p.now())
+	if err != nil && cursorTeamConfigured(cfg) {
+		return nil, &cursorTeamSelectionError{err}
+	}
+	return usage, err
+}
+
+func (p *plugin) enrichCursor(ctx context.Context, report *AllProvidersReport) {
+	if p.cursor == nil || providerDisabled(p.config(ctx), "cursor") {
+		return
+	}
+	for i := range report.Providers {
+		if report.Providers[i].Provider != "cursor" {
+			continue
+		}
+		if usage, err := p.cursorUsage(ctx, &report.Providers[i]); err == nil {
+			report.Providers[i] = *usage
+		} else {
+			var selectedTeam *cursorTeamSelectionError
+			if errors.As(err, &selectedTeam) {
+				cursorUnavailable(report, err)
+			} else {
+				report.Providers[i].DetailWarning = err.Error()
+			}
+		}
+		return
+	}
+	// A local Cursor session can also provide the report when the CLI's Cursor
+	// strategy failed. Respect the operator's provider allowlist.
+	providers := p.providerList(ctx)
+	pollCursor := providers == nil
+	for _, provider := range providers {
+		pollCursor = pollCursor || provider == "cursor"
+	}
+	if !pollCursor {
+		return
+	}
+	if usage, err := p.cursorUsage(ctx, nil); err == nil {
+		report.Providers = append(report.Providers, *usage)
+		unavailable := report.Unavailable[:0]
+		for _, item := range report.Unavailable {
+			if item.Provider != "cursor" {
+				unavailable = append(unavailable, item)
+			}
+		}
+		report.Unavailable = unavailable
+	} else {
+		var selectedTeam *cursorTeamSelectionError
+		if errors.As(err, &selectedTeam) {
+			cursorUnavailable(report, err)
+		}
+	}
+}
+
+func cursorUnavailable(report *AllProvidersReport, err error) {
+	providers := report.Providers[:0]
+	for _, usage := range report.Providers {
+		if usage.Provider != "cursor" {
+			providers = append(providers, usage)
+		}
+	}
+	report.Providers = providers
+	for i := range report.Unavailable {
+		if report.Unavailable[i].Provider == "cursor" {
+			report.Unavailable[i].Message = err.Error()
+			return
+		}
+	}
+	report.Unavailable = append(report.Unavailable, ProviderError{Provider: "cursor", Message: err.Error()})
 }
 
 // appendAugment adds Augment usage to the report when an Augment Analytics token
@@ -535,6 +669,9 @@ func (p *plugin) collectProviders(ctx context.Context) *AllProvidersReport {
 // read it on non-macOS hosts), so it lives outside the codexbar provider set.
 func (p *plugin) appendAugment(ctx context.Context, report *AllProvidersReport) {
 	cfg := p.config(ctx)
+	if providerDisabled(cfg, "augment") {
+		return
+	}
 	token := trimmedString(cfg[configKeyAugmentToken])
 	email := trimmedString(cfg[configKeyAugmentEmail])
 	if token == "" || email == "" {
@@ -595,10 +732,17 @@ func (p *plugin) providerList(ctx context.Context) []string {
 		return nil
 	}
 	if len(configured) == 0 {
-		return defaultProviders
+		configured = defaultProviders
 	}
 	// Augment is fetched via its own Analytics API (appendAugment), not codexbar.
-	return withoutAugment(configured)
+	cfg := p.config(ctx)
+	providers := []string{}
+	for _, id := range withoutAugment(configured) {
+		if !providerDisabled(cfg, id) {
+			providers = append(providers, id)
+		}
+	}
+	return providers
 }
 
 // withoutAugment drops augment/auggie from a codexbar provider list.
@@ -704,6 +848,10 @@ func (p *plugin) sessionJSON(ctx context.Context, taskID, activeSessionID string
 	// page — no per-hover codexbar run.
 	snap := p.snapshotForRead(ctx, refresh)
 	report.Codexbar = snap.Codexbar
+	if providerDisabled(p.config(ctx), report.Provider) {
+		report.Error = "Usage is disabled for this provider in plugin settings."
+		return marshalOr(report, sessionEncodeErr)
+	}
 	if report.Provider == "" {
 		// Unknown provider — the popover distinguishes "no known agent" from
 		// "codexbar missing" via the codexbar status.
@@ -728,6 +876,18 @@ func (p *plugin) sessionJSON(ctx context.Context, taskID, activeSessionID string
 		return marshalOr(report, sessionEncodeErr)
 	}
 	report.Usage, report.Error = pickProviderUsage(entries, report.Provider, p.now())
+	if report.Provider == "cursor" && p.cursor != nil {
+		if usage, err := p.cursorUsage(runCtx, report.Usage); err == nil {
+			report.Usage, report.Error = usage, ""
+		} else {
+			var selectedTeam *cursorTeamSelectionError
+			if errors.As(err, &selectedTeam) {
+				report.Usage, report.Error = nil, err.Error()
+			} else if report.Usage != nil {
+				report.Usage.DetailWarning = err.Error()
+			}
+		}
+	}
 	return marshalOr(report, sessionEncodeErr)
 }
 

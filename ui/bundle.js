@@ -9,9 +9,8 @@
 //     provider selected in that panel is kept as a client-side preference.
 //   • "app-status-bar-right" — an opt-in percentage, meter, or combined usage
 //     display adapting to desktop/tablet status and the phone Status drawer.
-//   • "plugin-settings" — an integration-status card on the plugin's own
-//     settings page (Settings → Plugins → Provider Usage) showing whether the
-//     codexbar CLI resolved and whether the Augment API is reachable.
+//   • "plugin-settings" — configuration grouped by detected provider, with
+//     shared refresh/display options and the usage connection's maintenance.
 //
 // All data comes from this plugin's Go backend: status surfaces read the
 // "overview" webhook, the settings card the "providers" webhook. Both return
@@ -288,17 +287,20 @@ function gaugeIcon(h, size, color) {
 }
 
 // ---- one utilization window: label, thin bar, "X% used · resets …" --------
-function cleanWindow(h, w, warn, high, pace) {
+function cleanWindow(h, w, warn, high, pace, showLimitReached) {
   var pct = typeof w.utilization_pct === "number" ? w.utilization_pct : 0;
   var color = tierColor(pct, warn, high);
   var reset = fmtReset(w);
   return h(
     "div",
     { style: { display: "flex", flexDirection: "column", gap: "6px" } },
-    h("div", { style: { fontWeight: 700, fontSize: "13px" } }, w.label || "window"),
+    h("div", { style: { display: "flex", justifyContent: "space-between", gap: "8px", fontWeight: 700, fontSize: "13px" } },
+      w.label || "window",
+      showLimitReached && pct >= 100 ? h("span", { style: { color: COLOR.high, fontSize: "11px", fontWeight: 500 } }, "Limit reached") : null,
+    ),
     h(
       "div",
-      { style: { height: "4px", borderRadius: "9999px", background: COLOR.track, overflow: "hidden" } },
+      { role: "meter", "aria-label": (w.label || "Usage") + " used", "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": Math.max(0, Math.min(100, pct)), style: { height: "4px", borderRadius: "9999px", background: COLOR.track, overflow: "hidden" } },
       h("div", { style: { height: "100%", width: Math.max(0, Math.min(100, pct)) + "%", background: color, borderRadius: "9999px", transition: "width 240ms ease" } }),
     ),
     h(
@@ -307,8 +309,58 @@ function cleanWindow(h, w, warn, high, pace) {
       h("span", { style: { fontWeight: 600, fontVariantNumeric: "tabular-nums", opacity: 0.9 } }, fmtPct(pct) + " used"),
       reset ? h("span", { style: { opacity: 0.5 } }, reset) : null,
     ),
+    w.detail ? h("div", { style: { fontSize: "10.5px", color: "var(--muted-foreground)" } }, w.detail) : null,
     pace ? h("div", { style: { fontSize: "10.5px", opacity: 0.45, marginTop: "-1px" } }, pace) : null,
   );
+}
+
+function providerWindows(h, p, warn, high) {
+  var windows = p.windows || [];
+  var paceFor = [p.pace_primary, p.pace_secondary];
+  if (p.provider !== "cursor") {
+    return windows.map(function (w, i) { return h("div", { key: i }, cleanWindow(h, w, warn, high, i < 2 ? paceText(paceFor[i]) : "")); });
+  }
+  // Missing plan-specific metrics are distinct from a reported 0% usage.
+  var labels = ["Total Usage", "Auto Usage", "API Usage"];
+  var rows = labels.map(function (label) {
+    var w = windows.find(function (entry) { return entry.label === label; });
+    return h("div", { key: label }, w ? cleanWindow(h, w, warn, high, "", true) : h(
+      "div", { style: { display: "flex", justifyContent: "space-between", gap: "8px", fontSize: "12px" } },
+      h("span", { style: { fontWeight: 600 } }, label),
+      h("span", { style: { color: "var(--muted-foreground)" } }, "Not reported"),
+    ));
+  });
+  windows.forEach(function (w) {
+    if (labels.indexOf(w.label) < 0) rows.push(h("div", { key: w.label }, cleanWindow(h, w, warn, high, "", true)));
+  });
+  return rows;
+}
+
+function spendAmount(amount, currency) {
+  try { return new Intl.NumberFormat(undefined, { style: "currency", currency: currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount); }
+  catch (_err) { return amount.toFixed(2) + " " + currency; }
+}
+
+function cursorExtrasPanel(h, p) {
+  if (p.provider !== "cursor") return null;
+  var spend = p.extra_usage;
+  return h("section", { "aria-label": "Cursor usage details", style: { display: "flex", flexDirection: "column", gap: "12px", fontSize: "11px", fontVariantNumeric: "tabular-nums" } },
+    h("div", { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+      h("div", { style: { display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "baseline" } },
+        h("span", { style: { fontSize: "12px", fontWeight: 600 } }, spend && spend.scope === "team" ? "Extra Usage · team" : "Extra Usage"),
+        h("span", { style: { color: "var(--muted-foreground)", textAlign: "right" } }, spend ? spendAmount(spend.used, spend.currency) + " spent" : "Not reported"),
+      ),
+      spend && typeof spend.limit === "number" && spend.limit > 0
+        ? h("span", { style: { color: "var(--muted-foreground)" } }, "Limit " + spendAmount(spend.limit, spend.currency) + (spend.scope === "team" ? " · shared across the team" : "")) : null,
+    ),
+    p.detail_warning ? h("p", { style: { margin: 0, fontSize: "10.5px", lineHeight: 1.5, color: "var(--muted-foreground)" } }, p.detail_warning) : null,
+  );
+}
+
+function cursorTeamLabel(h, p) {
+  if (p.provider !== "cursor" || !p.team_id) return null;
+  return h("div", { style: { fontSize: "10.5px", color: "var(--muted-foreground)", overflowWrap: "anywhere" } },
+    p.team_name ? p.team_name + " · Team " + p.team_id : "Team " + p.team_id);
 }
 
 // paceText condenses a codexbar pace side to its first clause, e.g.
@@ -491,7 +543,6 @@ function resetCreditsPanel(h, provider) {
 function providerPanel(host, p, warn, high, generatedAt, reload, isCurrent) {
   var h = host.jsx;
   var windows = p.windows || [];
-  var paceFor = [p.pace_primary, p.pace_secondary];
 
   return h(
     "div",
@@ -511,26 +562,26 @@ function providerPanel(host, p, warn, high, generatedAt, reload, isCurrent) {
         ),
         p.plan ? h("span", { style: { fontSize: "11.5px", opacity: 0.55, textAlign: "right", whiteSpace: "nowrap" } }, p.plan) : null,
       ),
+      cursorTeamLabel(h, p),
       h(
         "div",
         { style: { fontSize: "10.5px", opacity: 0.5, display: "flex", gap: "6px", alignItems: "center" } },
-        h("span", null, "Updated " + relTime(generatedAt)),
+        h("span", null, "Updated " + relTime(p.fetched_at || generatedAt)),
         h("span", { style: { opacity: 0.5 } }, "·"),
         h("button", { type: "button", onClick: reload, style: { border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "inherit", opacity: 0.9, fontSize: "10.5px" } }, "Refresh"),
       ),
     ),
-    windows.length
+    windows.length || p.provider === "cursor"
       ? h(
           "div",
           { style: { display: "flex", flexDirection: "column", gap: "13px" } },
-          windows.map(function (w, i) {
-            return h("div", { key: i }, cleanWindow(h, w, warn, high, i < 2 ? paceText(paceFor[i]) : ""));
-          }),
+          providerWindows(h, p, warn, high),
         )
       : p.detail
         ? null
         : h("div", { style: { fontSize: "12px", opacity: 0.55 } }, "No rate-limit windows reported."),
     resetCreditsPanel(h, p),
+    cursorExtrasPanel(h, p),
     // Augment consumption + pace, sober, below the bar.
     p.detail
       ? h(
@@ -818,7 +869,7 @@ function makeTopBarStatus(host) {
             },
             h(
               ui.Card,
-              { style: { padding: "13px 14px", boxShadow: "0 10px 28px rgba(15,20,40,0.20)" } },
+              { style: { padding: "13px 14px", maxHeight: Math.max(120, window.innerHeight - pos.top - 24) + "px", overflowY: "auto", boxShadow: "0 10px 28px rgba(15,20,40,0.20)" } },
               panelBody(host, state, selectedProvider, selectProvider, function () { load(true); }, true),
             ),
           )
@@ -856,14 +907,15 @@ function pillContent(host, d, selectedProvider) {
   ids.forEach(function (id) {
     var pu = providerByName(d.providers, id);
     if (!pu) return;
-    var pct = fmtPct(peakPct(pu));
+    var hasQuota = (pu.windows || []).length > 0;
+    var pct = hasQuota ? fmtPct(peakPct(pu)) : "—";
     if (segs.length) {
       segs.push(h("span", { key: "sep" + id, style: { width: "1px", alignSelf: "stretch", background: "currentColor", opacity: 0.22, margin: "1px 0" } }));
     }
     segs.push(
       h(
         "span",
-        { key: "seg" + id, title: providerLabel(id) + " · " + pct + " used", style: { display: "inline-flex", alignItems: "center", gap: "4px" } },
+        { key: "seg" + id, title: providerLabel(id) + " · " + (hasQuota ? pct + " used" : "Quota not reported"), style: { display: "inline-flex", alignItems: "center", gap: "4px" } },
         providerIcon(h, id, 14),
         h("span", { style: { fontVariantNumeric: "tabular-nums", fontWeight: 600 } }, pct),
       ),
@@ -943,7 +995,7 @@ function statusMeterBarItem(host, usage, warn, high, density, mode) {
           providerShort(usage.provider),
         )
       : null,
-    parts.meter ? statusMeterTrack(h, detail, warn, high) : null,
+    parts.meter && detail.window ? statusMeterTrack(h, detail, warn, high) : null,
     parts.percentage
       ? h(
           "span",
@@ -958,7 +1010,7 @@ function statusMeterBarItem(host, usage, warn, high, density, mode) {
               whiteSpace: "nowrap",
             },
           },
-          fmtPct(detail.pct),
+          detail.window ? fmtPct(detail.pct) : "—",
         )
       : null,
     full && detail.reset
@@ -1026,13 +1078,16 @@ function statusMeterDrawerRow(host, usage, warn, high) {
           ? h("span", { className: "shrink-0 text-xs font-medium tabular-nums text-foreground" }, fmtPct(detail.pct))
           : null,
       ),
+      cursorTeamLabel(h, usage),
       h(
         "div",
         { className: "min-w-0 truncate text-xs text-muted-foreground" },
         usageText + (detail.reset ? " · " + detail.reset : ""),
       ),
-      detail.window ? statusMeterTrack(h, detail, warn, high) : null,
+      usage.provider === "cursor" ? h("div", { style: { display: "flex", flexDirection: "column", gap: "13px", marginTop: "8px" } }, providerWindows(h, usage, warn, high))
+        : detail.window ? statusMeterTrack(h, detail, warn, high) : null,
       resetCreditsPanel(h, usage),
+      cursorExtrasPanel(h, usage),
     ),
   );
 }
@@ -1207,7 +1262,7 @@ function makeAppStatusBarUsage(host) {
             },
             h(
               ui.Card,
-              { style: { padding: "13px 14px", boxShadow: "0 10px 28px rgba(15,20,40,0.20)" } },
+              { style: { padding: "13px 14px", maxHeight: Math.max(120, window.innerHeight - pos.bottom - 24) + "px", overflowY: "auto", boxShadow: "0 10px 28px rgba(15,20,40,0.20)" } },
               panelBody(host, state, index, setIndex, function () { fetchOverview({ backendRefresh: true }); }),
             ),
           )
@@ -1369,35 +1424,6 @@ function codexbarRow(h, st) {
   });
 }
 
-// augmentRow: shown only when Augment is configured — ✅ "success" with the month's
-// consumption when it made it into the provider list, ❌ "error" (with the API
-// message) when it landed in `unavailable`, otherwise null (no token/email set).
-function augmentRow(h, d) {
-  var providers = (d && d.providers) || [];
-  for (var i = 0; i < providers.length; i++) {
-    if (providers[i].provider === "augment") {
-      return statusRow(h, {
-        ok: true,
-        title: "Augment Analytics API",
-        detail: providers[i].detail || "authenticated",
-        badge: "success",
-      });
-    }
-  }
-  var unavailable = (d && d.unavailable) || [];
-  for (var j = 0; j < unavailable.length; j++) {
-    if (unavailable[j].provider === "augment") {
-      return statusRow(h, {
-        ok: false,
-        title: "Augment Analytics API",
-        detail: unavailable[j].message || "unreachable",
-        badge: "error",
-      });
-    }
-  }
-  return null;
-}
-
 // refreshGlyph: a circular-arrows icon for the header re-check affordance.
 function refreshGlyph(h) {
   return h(
@@ -1431,7 +1457,7 @@ function settingsStatusBody(host, state, reload, update, updateState) {
   var header = h(
     "div",
     { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", marginBottom: "12px" } },
-    h("div", { style: { fontSize: "15px", fontWeight: 700 } }, "Integration status"),
+    h("div", { style: { fontSize: "13px", fontWeight: 600 } }, "Usage connection"),
     h(
       "button",
       {
@@ -1480,16 +1506,379 @@ function settingsStatusBody(host, state, reload, update, updateState) {
       updateState.error ? h("div", { role: "alert", style: { fontSize: "12px", color: COLOR.high } },
         "Couldn't update CodexBar: " + updateState.error) : null,
       updateState.message ? h("div", { role: "status", style: { fontSize: "12px" } }, updateState.message) : null,
-      augmentRow(h, d),
     );
   }
   return h("div", null, header, body);
 }
 
+function makeCursorTeamSettings(host) {
+  var React = host.React, h = host.jsx;
+  return function CursorTeamSettings(props) {
+    var stateHook = React.useState({ loading: true, saving: false, data: null, error: null, message: null });
+    var state = stateHook[0], setState = stateHook[1];
+    var choiceHook = React.useState("");
+    var choice = choiceHook[0], setChoice = choiceHook[1];
+    var mounted = React.useRef(false), generation = React.useRef(0), busy = React.useRef(false);
+
+    function load() {
+      if (!mounted.current || busy.current) return;
+      busy.current = true;
+      var request = ++generation.current;
+      setState(function (s) { return Object.assign({}, s, { loading: true, error: null, message: null }); });
+      host.api.fetch("webhooks/cursor-teams")
+        .then(function (r) { return r.json().then(function (data) {
+          if (!r.ok || data.error) throw new Error(data.error || "Couldn't load Cursor teams.");
+          return data;
+        }); })
+        .then(function (data) {
+          if (!mounted.current || generation.current !== request) return;
+          busy.current = false;
+          setChoice(data.selected_team_id || "");
+          setState({ loading: false, saving: false, data: data, error: null, message: null });
+        })
+        .catch(function (err) {
+          if (!mounted.current || generation.current !== request) return;
+          busy.current = false;
+          setState(function (s) { return Object.assign({}, s, { loading: false, error: err.message || String(err) }); });
+        });
+    }
+
+    function save() {
+      if (!mounted.current || busy.current || !state.data || choice === state.data.selected_team_id) return;
+      busy.current = true;
+      var request = ++generation.current;
+      setState(function (s) { return Object.assign({}, s, { saving: true, error: null, message: null }); });
+      host.api.fetch("webhooks/cursor-team", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ team_id: choice }),
+      })
+        .then(function (r) { return r.json().then(function (data) {
+          if (!r.ok || data.error) throw new Error(data.error || "Couldn't save the Cursor team.");
+          return data;
+        }); })
+        .then(function (data) {
+          if (!mounted.current || generation.current !== request) return;
+          busy.current = false;
+          setChoice(data.selected_team_id);
+          setState(function (s) { return Object.assign({}, s, {
+            saving: false, data: Object.assign({}, s.data, { selected_team_id: data.selected_team_id }), message: "Team saved. Usage is refreshing.",
+          }); });
+          if (props.onSaved) props.onSaved();
+        })
+        .catch(function (err) {
+          if (!mounted.current || generation.current !== request) return;
+          busy.current = false;
+          setState(function (s) { return Object.assign({}, s, { saving: false, error: err.message || String(err) }); });
+        });
+    }
+
+    React.useEffect(function () {
+      mounted.current = true;
+      load();
+      return function () { mounted.current = false; generation.current++; busy.current = false; };
+    }, []);
+
+    var teams = state.data && state.data.teams || [];
+    var saved = state.data && state.data.selected_team_id || "";
+    var missing = saved && !teams.some(function (team) { return team.id === saved; });
+    var disabled = state.loading || state.saving || props.disabled;
+    var names = Object.create(null);
+    teams.forEach(function (team) { names[team.name] = (names[team.name] || 0) + 1; });
+    return h("div", null,
+      h("label", { htmlFor: "provider-usage-cursor-team", style: { fontSize: "13px", fontWeight: 600 } }, "Team"),
+      h("p", { style: { fontSize: "12px", opacity: 0.65, margin: "6px 0 12px" } }, "Choose which team's usage to show. Teams come from your signed-in Cursor account."),
+      h("div", { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "8px" } },
+        h("select", {
+          id: "provider-usage-cursor-team", "aria-label": "Cursor team", value: choice, disabled: disabled || !state.data,
+          onChange: function (event) {
+            setChoice(event.target.value);
+            setState(function (s) { return Object.assign({}, s, { error: null, message: null }); });
+          },
+          style: { flex: "1 1 200px", minWidth: 0, maxWidth: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid var(--border)", background: "var(--background)", color: "inherit", fontSize: "13px" },
+        },
+          h("option", { value: "" }, state.loading && !state.data ? "Loading teams…" : "Account usage (automatic)"),
+          missing ? h("option", { value: saved, disabled: true }, "Unavailable team (" + saved + ")") : null,
+          teams.map(function (team) { return h("option", { key: team.id, value: team.id }, team.name + (names[team.name] > 1 ? " (" + team.id + ")" : "")); }),
+        ),
+        h(host.ui.Button, { type: "button", disabled: disabled || !state.data || choice === saved, onClick: save }, state.saving ? "Saving…" : "Save team"),
+        h(host.ui.Button, { type: "button", variant: "outline", disabled: disabled, onClick: load }, "Reload teams"),
+      ),
+      missing ? h("p", { style: { fontSize: "12px", color: COLOR.warn } }, "Your saved team is no longer in this account. Choose another team or account usage.") : null,
+      state.data && !teams.length && !state.error ? h("p", { style: { fontSize: "12px", opacity: 0.65 } }, "No teams were found for this Cursor account.") : null,
+      state.error ? h("p", { role: "alert", style: { fontSize: "12px", color: COLOR.high, overflowWrap: "anywhere" } }, state.error) : null,
+      state.message ? h("p", { role: "status", style: { fontSize: "12px", marginBottom: 0 } }, state.message) : null,
+    );
+  };
+}
+
+var SETTINGS_SECRET_MASK = "********";
+var SETTINGS_FIELDS = {
+  cursor_cookie_header: { label: "Session cookie", secret: true, hint: "Optional. Uses your Cursor app session automatically. For a remote host, save a cursor.com cookie here, then reload teams." },
+  augment_api_token: { label: "API token", secret: true, hint: "Analytics token from app.augmentcode.com/settings/personal-api-tokens." },
+  augment_email: { label: "Account email", type: "email", hint: "Your Augment organization email." },
+  augment_monthly_budget: { label: "Monthly budget", type: "number", min: 0, hint: "Leave empty to use the budget reported by Augment." },
+  augment_resource: { label: "Plan unit", default: "credits", options: [["credits", "Credits"], ["usd", "USD"]] },
+  codexbar_poll_minutes: { label: "Refresh every (minutes)", type: "number", min: 1, default: 5 },
+  display_status_bar_mode: { label: "Status bar", default: "off", options: [["off", "Off"], ["percentage", "Percentage"], ["meter", "Meter"], ["both", "Meter and percentage"]] },
+  display_pill_providers: { label: "Status bar providers", default: "" },
+  display_threshold_warn: { label: "Warning at (%)", type: "number", min: 0, max: 100, default: 75 },
+  display_threshold_high: { label: "High usage at (%)", type: "number", min: 0, max: 100, default: 90 },
+  codexbar_command: { label: "CLI path", hint: "Leave empty to find or download CodexBar automatically." },
+};
+var PROVIDER_SETTING_FIELDS = {
+  cursor: ["cursor_cookie_header"],
+  augment: ["augment_api_token", "augment_email", "augment_monthly_budget", "augment_resource"],
+};
+
+function settingsList(value) {
+  return String(value || "").toLowerCase().split(",").map(function (id) { return id.trim() === "opencode" ? "opencodego" : id.trim(); }).filter(Boolean);
+}
+
+function settingsProviderEnabled(config, id) {
+  var allowed = settingsList(config.codexbar_providers);
+  return settingsList(config.disabled_providers).indexOf(id) < 0 &&
+    (id === "augment" || !allowed.length || allowed.indexOf("all") >= 0 || allowed.indexOf(id) >= 0);
+}
+
+function settingsValue(config, key) {
+  if (key.indexOf("enabled:") === 0) return settingsProviderEnabled(config, key.slice(8));
+  var field = SETTINGS_FIELDS[key] || {};
+  var value = config[key] == null ? field.default : config[key];
+  return value == null ? "" : String(value);
+}
+
+function changedSettings(config, draft) {
+  var changed = {};
+  Object.keys(draft).forEach(function (key) {
+    if (draft[key] !== settingsValue(config, key)) changed[key] = draft[key];
+  });
+  return changed;
+}
+
+// Only edited fields are merged into a fresh masked config. PATCH replaces the
+// host's config wholesale, so submitting our stale form or a single section
+// directly would erase other provider settings and stored credentials.
+function applySettingsChanges(config, changed) {
+  var next = Object.assign({}, config);
+  Object.keys(changed).forEach(function (key) {
+    var value = changed[key];
+    if (key.indexOf("enabled:") === 0) {
+      var id = key.slice(8), disabled = settingsList(next.disabled_providers).filter(function (other) { return other !== id; });
+      if (!value) disabled.push(id);
+      if (disabled.length) next.disabled_providers = disabled.join(",");
+      else delete next.disabled_providers;
+      var allowed = settingsList(next.codexbar_providers);
+      if (value && id !== "augment" && allowed.length && allowed.indexOf("all") < 0 && allowed.indexOf(id) < 0) {
+        next.codexbar_providers = allowed.concat(id).join(",");
+      }
+      return;
+    }
+    var field = SETTINGS_FIELDS[key];
+    if (!field) throw new Error("Unknown setting.");
+    if (value === "") { delete next[key]; return; }
+    if (field.type === "number") {
+      var number = Number(value);
+      if (!String(value).trim() || !isFinite(number) || (field.min != null && number < field.min) || (field.max != null && number > field.max)) {
+        throw new Error("Enter a valid value for " + field.label.toLowerCase() + ".");
+      }
+      next[key] = number;
+    } else {
+      next[key] = value;
+    }
+  });
+  if (("display_threshold_warn" in changed || "display_threshold_high" in changed) &&
+      Number(settingsValue(next, "display_threshold_warn")) >= Number(settingsValue(next, "display_threshold_high"))) {
+    throw new Error("High usage must be above the warning threshold.");
+  }
+  return next;
+}
+
+function maskSettings(config) {
+  var masked = Object.assign({}, config);
+  Object.keys(SETTINGS_FIELDS).forEach(function (key) {
+    if (SETTINGS_FIELDS[key].secret && masked[key]) masked[key] = SETTINGS_SECRET_MASK;
+  });
+  return masked;
+}
+
+function settingsProviders(data) {
+  var found = Object.create(null);
+  ((data && data.detected_providers) || []).forEach(function (provider) { found[provider.provider] = provider; });
+  ((data && data.providers) || []).forEach(function (provider) {
+    if (!found[provider.provider]) found[provider.provider] = { provider: provider.provider, via: "usage" };
+  });
+  return Object.keys(found).sort(function (a, b) { return providerLabel(a).localeCompare(providerLabel(b)); }).map(function (id) { return found[id]; });
+}
+
+function statusProvidersField(host, key, value, change, disabled, providers) {
+  var h = host.jsx, id = "provider-setting-" + key;
+  var selected = settingsList(value).filter(function (item, i, list) { return list.indexOf(item) === i; });
+  if (!selected.length) selected = ["current"];
+  var options = [["current", "Current session"], ["all", "All providers"]];
+  providers.map(function (provider) { return provider.provider; }).concat(selected).forEach(function (provider) {
+    if (!options.some(function (option) { return option[0] === provider; })) options.push([provider, providerLabel(provider)]);
+  });
+  var all = selected.indexOf("all") >= 0;
+  var summary = all ? "All providers" : selected.map(function (provider) {
+    return provider === "current" ? "Current session" : providerLabel(provider);
+  }).join(", ");
+  return h("div", { key: key, style: { minWidth: 0 } },
+    h("div", { id: id + "-label", style: { fontWeight: 600, fontSize: "13px", marginBottom: "6px" } }, "Status bar providers"),
+    h("details", { id: id, style: { border: "1px solid var(--border)", borderRadius: "6px", background: "var(--background)", fontSize: "13px" } },
+      h("summary", { "aria-labelledby": id + "-label " + id + "-summary", "aria-disabled": disabled,
+        onClick: function (event) { if (disabled) event.preventDefault(); },
+        style: { padding: "12px 10px", minHeight: "44px", cursor: disabled ? "default" : "pointer", overflowWrap: "anywhere" },
+      }, h("span", { id: id + "-summary" }, summary)),
+      h("fieldset", { disabled: disabled, "aria-labelledby": id + "-label", style: { border: 0, margin: 0, padding: "0 10px 10px", display: "flex", flexDirection: "column", gap: "6px" } },
+        options.map(function (option) {
+          return h("label", { key: option[0], style: { display: "flex", alignItems: "center", gap: "8px", minHeight: "44px", overflowWrap: "anywhere" } },
+            h("input", { type: "checkbox", value: option[0], checked: all ? option[0] === "all" : selected.indexOf(option[0]) >= 0,
+              onChange: function (event) {
+                var next = all ? [] : selected.filter(function (provider) { return provider !== option[0]; });
+                if (event.target.checked) next = option[0] === "all" ? ["all"] : next.concat(option[0]);
+                change(key, next.join(","));
+              },
+            }), option[1]);
+        })),
+      h("p", { style: { margin: "0 10px 10px", fontSize: "12px", color: "var(--muted-foreground)" } }, "Choose several providers or All providers. With none selected, the current session is used.")),
+  );
+}
+
+function configurationField(host, key, value, change, disabled, providers) {
+  if (key === "display_pill_providers") return statusProvidersField(host, key, value, change, disabled, providers);
+  var h = host.jsx, spec = SETTINGS_FIELDS[key], id = "provider-setting-" + key;
+  var props = {
+    id: id, value: spec.secret && value === SETTINGS_SECRET_MASK ? "" : value, disabled: disabled,
+    onChange: function (event) { change(key, event.target.value); },
+    style: { width: "100%", minWidth: 0, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: "6px", background: "var(--background)", color: "inherit", font: "inherit", fontSize: "13px" },
+  };
+  var options = spec.options ? spec.options.slice() : null;
+  if (options && !options.some(function (option) { return option[0] === value; })) options.push([value, value.split(",").map(providerLabel).join(", ")]);
+  var input = options
+    ? h("select", props, options.map(function (option) { return h("option", { key: option[0], value: option[0] }, option[1]); }))
+    : h("input", Object.assign({}, props, { type: spec.secret ? "password" : spec.type || "text", min: spec.min, max: spec.max, step: "any", autoComplete: "off", placeholder: spec.secret && value === SETTINGS_SECRET_MASK ? "Saved securely" : undefined }));
+  return h("div", { key: key, style: { minWidth: 0 } },
+    h("label", { htmlFor: id, style: { display: "block", fontWeight: 600, fontSize: "13px", marginBottom: "6px" } }, spec.label),
+    input,
+    spec.secret && value === SETTINGS_SECRET_MASK ? h("button", { type: "button", disabled: disabled, onClick: function () { change(key, ""); }, style: { border: "none", background: "none", padding: "6px 0 0", color: "inherit", fontSize: "12px", cursor: "pointer" } }, "Clear saved " + spec.label.toLowerCase()) : null,
+    spec.hint ? h("p", { style: { fontSize: "12px", opacity: 0.65, lineHeight: 1.5, margin: "6px 0 0", overflowWrap: "anywhere" } }, spec.hint) : null,
+  );
+}
+
+function settingsPlan(plan) {
+  return plan ? plan.charAt(0).toUpperCase() + plan.slice(1) : "";
+}
+
+function settingsFoundVia(via) {
+  return { cli: "App installed on this machine", app: "Desktop app installed", configuration: "Local configuration found", usage: "Usage connection found" }[via] || "Provider detected";
+}
+
+function settingsSource(source) {
+  return { oauth: "OAuth", web: "Provider dashboard", cli: "Local CLI", analytics: "Augment Analytics", "cursor-team": "Cursor team dashboard" }[source] || source || "Provider connection";
+}
+
+function settingsUpdated(at) {
+  var elapsed = Date.now() - new Date(at).getTime();
+  if (!at || !isFinite(elapsed)) return "Not checked yet";
+  if (elapsed < 60000) return "Updated just now";
+  if (elapsed < 3600000) return "Updated " + Math.floor(elapsed / 60000) + "m ago";
+  if (elapsed < 86400000) return "Updated " + Math.floor(elapsed / 3600000) + "h ago";
+  return "Updated " + Math.floor(elapsed / 86400000) + "d ago";
+}
+
+function settingsConnection(provider, usage, failure, enabled, pending, config) {
+  var id = provider.provider, name = providerLabel(id);
+  if (!enabled) return { label: "Paused", tone: "neutral", summary: "Usage is paused", hint: "Enable Show usage to include this provider in your usage displays." };
+  if (usage) return { label: "Connected", tone: "good", summary: settingsPlan(usage.plan) || settingsSource(usage.source) };
+  if (id === "augment" && (!config.augment_api_token || !config.augment_email)) {
+    return { label: "Needs setup", tone: "warning", summary: "Connect Augment Analytics", hint: "Add your Analytics API token and account email below to read monthly usage. You can also choose your plan unit and budget." };
+  }
+  if (pending) return { label: "Checking usage", tone: "neutral", summary: settingsFoundVia(provider.via), hint: "Reading usage in the background. You can configure this provider while it loads." };
+  if (failure) {
+    var signIn = /unauthori[sz]ed|not signed|sign in|log.?in|expired|credential|\b401\b/i.test(failure.message || "");
+    return {
+      label: signIn ? "Sign-in needed" : "Unavailable", tone: "warning",
+      summary: signIn ? "Check your " + name + " sign-in" : "Usage could not be read",
+      hint: id === "augment" ? "Check the Analytics token and account email below, then refresh usage." :
+        id === "cursor" ? "Check your Cursor app session or the session cookie below, then reload teams and refresh usage." :
+        "Check your " + name + " sign-in on the machine running Kandev, then refresh usage. CodexBar diagnostics and updates are in Shared settings → Advanced.",
+    };
+  }
+  return { label: "Detected", tone: "neutral", summary: settingsFoundVia(provider.via), hint: "No usage has been reported yet. Check your " + name + " connection on this machine, then refresh usage." };
+}
+
+function settingsProviderSummary(host, provider, usage, connection, enabled, warn, high) {
+  var h = host.jsx, detail = enabled && usage ? statusMeterDetail(usage) : null;
+  return h("summary", { className: "provider-settings-summary" },
+    h("span", { className: "provider-settings-chevron", "aria-hidden": true }, "›"),
+    h("span", { className: "provider-settings-icon" }, providerIcon(h, provider.provider, 23)),
+    h("span", { className: "provider-settings-heading" },
+      h("span", { className: "provider-settings-title" }, providerLabel(provider.provider),
+        h("span", { className: "provider-settings-badge", "data-tone": connection.tone }, connection.label)),
+      h("span", { className: "provider-settings-subtitle" }, connection.summary,
+        usage && enabled && usage.team_name ? " · " + usage.team_name : null)),
+    detail && detail.window ? h("span", { className: "provider-settings-preview", "data-settings-summary-preview": true },
+      h("span", null, h("strong", null, detail.used), " · " + detail.label),
+      h("span", { className: "provider-settings-preview-track", "aria-hidden": true }, h("span", { style: { width: detail.pct + "%", background: tierColor(detail.pct, warn, high) } }))) :
+      usage && enabled && usage.detail ? h("span", { className: "provider-settings-preview" }, usage.detail) : null,
+  );
+}
+
+function settingsProviderDetails(host, provider, usage, failure, connection, pending, report) {
+  var h = host.jsx;
+  return h("div", { className: "provider-settings-details" },
+    usage ? h("div", { className: "provider-settings-usage" },
+      usage.detail ? h("p", { className: "provider-settings-consumption" }, usage.detail) : null,
+      (usage.windows || []).length ? h("div", { className: "provider-settings-quotas", "aria-label": providerLabel(provider.provider) + " usage" },
+        providerWindows(h, usage, report && report.warn_threshold, report && report.high_threshold)) : null,
+      cursorExtrasPanel(h, usage),
+      resetCreditsPanel(h, usage),
+      usage.detail_warning && usage.provider !== "cursor" ? h("p", { className: "provider-settings-notice" }, usage.detail_warning) : null,
+    ) : h("div", { className: "provider-settings-notice", "data-tone": connection.tone },
+      h("strong", null, connection.summary), h("p", null, connection.hint)),
+    h("div", { className: "provider-settings-metadata" },
+      h("span", null, settingsFoundVia(provider.via)),
+      usage ? h("span", null, "Source: ", settingsSource(usage.source)) : null,
+      h("span", { title: usage && usage.fetched_at || undefined }, pending ? "Refreshing usage…" : usage ? settingsUpdated(usage.fetched_at) :
+        failure ? settingsUpdated(report && report.generated_at).replace("Updated", "Checked") : "Not checked yet")),
+    failure ? h("details", { className: "provider-settings-diagnostics" },
+      h("summary", null, "Connection details"), h("p", null, failure.message)) : null,
+  );
+}
+
+var PROVIDER_SETTINGS_CSS =
+  '#provider-usage-settings .provider-settings-summary{display:flex;align-items:center;gap:12px;cursor:pointer;list-style:none;padding:16px 18px;min-height:72px}' +
+  '#provider-usage-settings .provider-settings-chevron{flex:none;color:var(--muted-foreground)}' +
+  '#provider-usage-settings .provider-settings-icon{display:flex;align-items:center;justify-content:center;flex:none;width:38px;height:38px;border-radius:10px;background:var(--muted)}' +
+  '#provider-usage-settings .provider-settings-heading{display:flex;flex:1;min-width:0;flex-direction:column;gap:5px}' +
+  '#provider-usage-settings .provider-settings-title{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:14px;font-weight:650}' +
+  '#provider-usage-settings .provider-settings-subtitle{font-size:12px;color:var(--muted-foreground);overflow-wrap:anywhere;line-height:1.5}' +
+  '#provider-usage-settings .provider-settings-badge{border-radius:20px;padding:2px 7px;font-size:10px;font-weight:550;background:var(--muted);color:var(--muted-foreground)}' +
+  '#provider-usage-settings .provider-settings-badge[data-tone="good"]{color:#279b71;background:color-mix(in srgb,#279b71 12%,transparent)}' +
+  '#provider-usage-settings .provider-settings-badge[data-tone="warning"]{color:#b98236;background:color-mix(in srgb,#b98236 12%,transparent)}' +
+  '#provider-usage-settings .provider-settings-preview{display:flex;flex-direction:column;gap:8px;width:170px;max-width:100%;font-size:12px;font-variant-numeric:tabular-nums;color:var(--muted-foreground)}' +
+  '#provider-usage-settings .provider-settings-preview strong{color:var(--foreground);font-weight:600}' +
+  '#provider-usage-settings .provider-settings-preview-track{display:block;height:4px;overflow:hidden;border-radius:4px;background:var(--muted)}' +
+  '#provider-usage-settings .provider-settings-preview-track>span{display:block;height:100%;border-radius:4px}' +
+  '#provider-usage-settings .provider-settings-body{display:flex;flex-direction:column;gap:18px;padding:16px 18px 18px;border-top:1px solid var(--border)}' +
+  '#provider-usage-settings .provider-settings-details,#provider-usage-settings .provider-settings-usage{display:flex;flex-direction:column;gap:14px;min-width:0}' +
+  '#provider-usage-settings .provider-settings-quotas{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(210px,100%),1fr));gap:12px}' +
+  '#provider-usage-settings .provider-settings-quotas>div{padding:14px;border:1px solid var(--border);border-radius:8px;background:color-mix(in srgb,var(--muted) 40%,transparent);min-width:0}' +
+  '#provider-usage-settings .provider-settings-consumption{font-size:14px;font-weight:600;margin:0}' +
+  '#provider-usage-settings .provider-settings-notice{padding:12px 14px;background:var(--muted);border-radius:8px;font-size:12px;line-height:1.6;margin:0;overflow-wrap:anywhere}' +
+  '#provider-usage-settings .provider-settings-notice p{color:var(--muted-foreground);margin:4px 0 0}' +
+  '#provider-usage-settings .provider-settings-metadata{display:flex;flex-wrap:wrap;gap:6px 18px;color:var(--muted-foreground);font-size:11px;line-height:1.5}' +
+  '#provider-usage-settings .provider-settings-diagnostics{font-size:12px;overflow-wrap:anywhere;color:var(--muted-foreground)}' +
+  '#provider-usage-settings .provider-settings-diagnostics summary{cursor:pointer;min-height:28px}' +
+  '#provider-usage-settings .provider-settings-diagnostics p{margin:6px 0 0}' +
+  '#provider-usage-settings .provider-settings-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}' +
+  '#provider-usage-settings .provider-settings-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}' +
+  '@media(max-width:639px){#provider-usage-settings .provider-settings-summary{flex-wrap:wrap;gap:10px;padding:14px}#provider-usage-settings .provider-settings-preview{width:100%;margin-left:64px}#provider-usage-settings .provider-settings-body{padding:14px}#provider-usage-settings .provider-settings-title{gap:6px}#provider-usage-settings .provider-settings-toolbar{align-items:flex-start}}';
+
 function makeSettingsStatus(host) {
   var React = host.React;
   var h = host.jsx;
   var ui = host.ui;
+  var CursorTeamSettings = makeCursorTeamSettings(host);
 
   return function SettingsStatus(props) {
     var ctx = (props && props.slotProps) || {};
@@ -1505,33 +1894,135 @@ function makeSettingsStatus(host) {
     var updating = React.useRef(false);
     var mounted = React.useRef(true);
     var requestGeneration = React.useRef(0);
+    var providerRequest = React.useRef(null);
+    var discoveryHook = React.useState({ loading: true, data: null, error: null });
+    var discovery = discoveryHook[0], setDiscovery = discoveryHook[1];
+    var discoveryGeneration = React.useRef(0);
+    var configHook = React.useState({ loading: true, data: null, error: null });
+    var configState = configHook[0], setConfigState = configHook[1];
+    var draftHook = React.useState({}), draft = draftHook[0], setDraft = draftHook[1];
+    var saveHook = React.useState({ loading: false, error: null, message: null });
+    var saveState = saveHook[0], setSaveState = saveHook[1];
+    var saving = React.useRef(false), configGeneration = React.useRef(0);
 
-    // force re-runs codexbar server-side; silent re-reads the warm snapshot
-    // without a loading flash so the card refreshes in place.
+    function readConfig() {
+      return host.api.fetch("config", { cache: "no-store" }).then(function (r) { return r.json().then(function (data) {
+        if (!r.ok || data.error) throw new Error(data.error || "Couldn't load settings.");
+        return data.config || {};
+      }); });
+    }
+
+    function loadConfig() {
+      var generation = ++configGeneration.current;
+      setConfigState(function (s) { return Object.assign({}, s, { loading: true, error: null }); });
+      readConfig().then(function (config) {
+        if (!mounted.current || generation !== configGeneration.current) return;
+        setConfigState({ loading: false, data: config, error: null });
+      }).catch(function (err) {
+        if (!mounted.current || generation !== configGeneration.current) return;
+        setConfigState(function (s) { return Object.assign({}, s, { loading: false, error: err.message || String(err) }); });
+      });
+    }
+
+    function loadDiscovery() {
+      if (!mounted.current || updating.current) return;
+      var generation = ++discoveryGeneration.current;
+      setDiscovery(function (s) { return { loading: true, data: s.data, error: null }; });
+      host.api.fetch("webhooks/discovery", { cache: "no-store" }).then(function (r) { return r.json().then(function (data) {
+        if (!r.ok || data.error) throw new Error(data.error || "Couldn't scan local providers.");
+        return data;
+      }); }).then(function (data) {
+        if (!mounted.current || generation !== discoveryGeneration.current) return;
+        setDiscovery({ loading: false, data: data, error: null });
+      }).catch(function (err) {
+        if (!mounted.current || generation !== discoveryGeneration.current) return;
+        setDiscovery(function (s) { return { loading: false, data: s.data, error: err.message || String(err) }; });
+      });
+    }
+
+    function change(key, value) {
+      setDraft(function (s) { var next = Object.assign({}, s); next[key] = value; return next; });
+      setSaveState({ loading: false, error: null, message: null });
+    }
+
+    function saveConfig() {
+      if (saving.current || updating.current || !configState.data) return;
+      var changed = changedSettings(configState.data, draft);
+      if (!Object.keys(changed).length) return;
+      try { applySettingsChanges(configState.data, changed); }
+      catch (err) { setSaveState({ loading: false, error: err.message, message: null }); return; }
+      saving.current = true;
+      // Config saves restart the plugin. Release this page's usage request
+      // first so the host does not wait for a slow provider before restarting.
+      requestGeneration.current++;
+      if (providerRequest.current && providerRequest.current.abort) providerRequest.current.abort();
+      providerRequest.current = null;
+      setState(function (s) { return Object.assign({}, s, { loading: false }); });
+      var generation = ++configGeneration.current;
+      setSaveState({ loading: true, error: null, message: null });
+      var submitted;
+      readConfig().then(function (latest) {
+        if (!mounted.current || generation !== configGeneration.current) return;
+        submitted = applySettingsChanges(latest, changed);
+        // The host's scoped fetch always appends a slash. Config PATCH targets
+        // the plugin record itself, so use its exact URL on the same backend.
+        return fetch((host.api.baseUrl || "") + "/api/plugins/kandev-provider-usage", {
+          method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ config: submitted }),
+        });
+      }).then(function (r) {
+        if (!r) return;
+        return r.json().then(function (data) {
+          if (!r.ok || data.error) throw new Error(data.error || "Couldn't save settings.");
+          if (!mounted.current || generation !== configGeneration.current) return;
+          saving.current = false;
+          setConfigState({ loading: false, data: maskSettings(submitted), error: null });
+          setDraft({});
+          setSaveState({ loading: false, error: null, message: "Settings saved." });
+          loadDiscovery();
+          fetchProviders({ restart: true });
+        });
+      }).catch(function (err) {
+        if (!mounted.current || generation !== configGeneration.current) return;
+        saving.current = false;
+        setSaveState({ loading: false, error: err.message || String(err), message: null });
+      });
+    }
+
+    // Keep the current cards while usage loads. A pending read is shared by
+    // timer ticks; saves and team changes replace it and discard its response.
     function fetchProviders(opts) {
       opts = opts || {};
-      if (!mounted.current || updating.current) return;
-      var generation = requestGeneration.current;
-      if (!opts.silent) {
-        setState(function (s) { return { loading: true, data: s.data, error: null }; });
-      }
+      if (!mounted.current || updating.current || saving.current) return;
+      if (providerRequest.current && !opts.restart) return;
+      if (providerRequest.current && providerRequest.current.abort) providerRequest.current.abort();
+      var controller = typeof AbortController === "function" ? new AbortController() : null;
+      providerRequest.current = controller || {};
+      var generation = ++requestGeneration.current;
+      setState(function (s) { return { loading: true, data: s.data, error: null }; });
       host.api
-        .fetch("webhooks/providers" + (opts.backendRefresh ? "?refresh=1" : ""))
-        .then(function (r) { return r.json(); })
+        .fetch("webhooks/providers" + (opts.backendRefresh ? "?refresh=1" : ""), controller ? { signal: controller.signal } : undefined)
+        .then(function (r) { return r.json().then(function (data) {
+          if (!r.ok || data.error) throw new Error(data.error || "Couldn't load usage.");
+          return data;
+        }); })
         .then(function (data) {
-          if (generation !== requestGeneration.current) return;
+          if (!mounted.current || generation !== requestGeneration.current) return;
+          providerRequest.current = null;
           setState({ loading: false, data: data, error: null });
         })
         .catch(function (err) {
-          if (generation !== requestGeneration.current || opts.silent) return; // keep the last good render on a transient poll failure
-          setState({ loading: false, data: null, error: String(err && err.message ? err.message : err) });
+          if (!mounted.current || generation !== requestGeneration.current) return;
+          providerRequest.current = null;
+          setState(function (s) { return { loading: false, data: s.data, error: String(err && err.message ? err.message : err) }; });
         });
     }
 
     function updateCodexbar() {
-      if (!mounted.current || updating.current) return;
+      if (!mounted.current || updating.current || saving.current) return;
       updating.current = true;
       requestGeneration.current++;
+      if (providerRequest.current && providerRequest.current.abort) providerRequest.current.abort();
+      providerRequest.current = null;
       var generation = requestGeneration.current;
       setUpdateState({ loading: true, error: null, message: null });
       host.api.fetch("webhooks/update", { method: "POST" })
@@ -1553,6 +2044,7 @@ function makeSettingsStatus(host) {
         .catch(function (err) {
           if (!mounted.current || generation !== requestGeneration.current) return;
           updating.current = false;
+          setState(function (s) { return Object.assign({}, s, { loading: false }); });
           setUpdateState({ loading: false, error: String(err && err.message ? err.message : err), message: null });
         });
     }
@@ -1562,9 +2054,15 @@ function makeSettingsStatus(host) {
     React.useEffect(function () {
       mounted.current = true;
       load(false);
+      loadConfig();
+      loadDiscovery();
       return function () {
         mounted.current = false;
         requestGeneration.current++;
+        configGeneration.current++;
+        discoveryGeneration.current++;
+        if (providerRequest.current && providerRequest.current.abort) providerRequest.current.abort();
+        providerRequest.current = null;
       };
     }, []);
 
@@ -1575,7 +2073,68 @@ function makeSettingsStatus(host) {
       return function () { clearInterval(id); };
     }, []);
 
-    return h(ui.Card, { style: { padding: "16px 18px" } }, settingsStatusBody(host, state, function () { load(true); }, updateCodexbar, updateState));
+    var config = configState.data || {};
+    var providerData = Object.assign({}, state.data || {}, discovery.data ? { detected_providers: discovery.data.detected_providers } : {});
+    var providers = settingsProviders(providerData);
+    var ready = !!(configState.data && (discovery.data || state.data));
+    var busy = saveState.loading || updateState.loading, changes = changedSettings(config, draft);
+    function value(key) { return key in draft ? draft[key] : settingsValue(config, key); }
+    function field(key) { return configurationField(host, key, value(key), change, busy, providers); }
+    var cardStyle = { padding: "16px 18px", minWidth: 0 };
+    var gridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(230px,100%),1fr))", gap: "16px" };
+    return h("div", { id: "provider-usage-settings", "data-ready": ready, style: { display: "flex", flexDirection: "column", gap: "12px" } },
+      // The current host renders its schema fallback beside this slot. Retain
+      // that schema for validation and secret masking, and replace the fallback
+      // only while this complete editor is mounted and has loaded config.
+      h("style", null, '[data-testid="plugin-detail-kandev-provider-usage"]:has(#provider-usage-settings[data-ready="true"]) [data-testid="plugin-settings-card"]{display:none}' +
+        PROVIDER_SETTINGS_CSS +
+        '#provider-usage-settings details[open]>summary .provider-settings-chevron{transform:rotate(90deg)}' +
+        '#provider-usage-settings summary::-webkit-details-marker{display:none}' +
+        '#provider-usage-settings :is(input,select,button,summary):focus-visible{outline:2px solid var(--ring,#8085e6);outline-offset:3px}'),
+      h("div", { className: "provider-settings-toolbar" },
+        h("div", null,
+          h("h3", { style: { fontSize: "16px", fontWeight: 600, margin: 0 } }, "Detected providers"),
+          h("p", { style: { fontSize: "12px", color: "var(--muted-foreground)", margin: "5px 0 0" } },
+            !ready ? "Finding local provider connections…" : state.loading ? "Checking usage in the background. Settings are ready to edit." : "Usage and connections on the machine running Kandev.")),
+        h("div", { className: "provider-settings-actions" },
+          h(ui.Button, { type: "button", variant: "outline", onClick: loadDiscovery, disabled: discovery.loading || busy }, discovery.loading ? "Scanning…" : "Rescan"),
+          h(ui.Button, { type: "button", onClick: function () { load(true); }, disabled: state.loading || busy }, state.loading ? "Checking usage…" : "Refresh usage"))),
+      configState.error ? h("div", { role: "alert" }, configState.error, " ", h(ui.Button, { type: "button", onClick: loadConfig }, "Retry settings")) : null,
+      state.error ? h("p", { role: "alert", style: { fontSize: "12px", color: COLOR.high } }, state.error) : null,
+      discovery.error ? h("p", { role: "alert", style: { fontSize: "12px", color: COLOR.high } }, discovery.error) : null,
+      !ready ? h("p", { style: { fontSize: "13px", opacity: 0.65 } }, !configState.error && (configState.loading || discovery.loading) ? "Loading configuration and scanning local providers…" : "Use the settings form below until configuration is available.") : h("div", { style: { display: "flex", flexDirection: "column", gap: "12px" } },
+        providers.map(function (provider) {
+          var id = provider.provider, enabled = value("enabled:" + id);
+          var usage = ((state.data && state.data.providers) || []).find(function (p) { return p.provider === id; });
+          var failure = ((state.data && state.data.unavailable) || []).find(function (p) { return p.provider === id; });
+          var connection = settingsConnection(provider, usage, failure, enabled, state.loading, config);
+          return h(ui.Card, { key: id, style: { padding: 0, minWidth: 0, gap: 0 } }, h("details", { "data-provider-settings": id },
+            settingsProviderSummary(host, provider, usage, connection, enabled, providerData.warn_threshold, providerData.high_threshold),
+            h("div", { className: "provider-settings-body" },
+              h("label", { style: { display: "flex", alignItems: "center", gap: "8px", fontSize: "13px" } },
+                h("input", { type: "checkbox", checked: enabled, disabled: busy, onChange: function (event) { change("enabled:" + id, event.target.checked); } }), "Show usage"),
+              settingsProviderDetails(host, provider, enabled ? usage : null, enabled ? failure : null, connection, enabled && state.loading, providerData),
+              id === "cursor" ? h(CursorTeamSettings, { disabled: busy, onSaved: function () { fetchProviders({ restart: true }); } }) : null,
+              (PROVIDER_SETTING_FIELDS[id] || []).length ? h("div", { style: gridStyle }, (PROVIDER_SETTING_FIELDS[id] || []).map(field)) : null,
+            ),
+          ));
+        }),
+        !providers.length ? h("p", { style: { fontSize: "13px", opacity: 0.65 } }, discovery.loading ? "Scanning for providers on this machine…" : "No providers detected. Install or sign in to a provider on the machine running Kandev, then rescan.") : null,
+        h(ui.Card, { style: cardStyle },
+          h("h3", { style: { fontSize: "14px", fontWeight: 600, margin: "0 0 16px" } }, "Shared settings"),
+          h("div", { style: gridStyle }, field("codexbar_poll_minutes"), field("display_status_bar_mode"), value("display_status_bar_mode") !== "off" ? field("display_pill_providers") : null),
+          h("details", { style: { marginTop: "18px" } },
+            h("summary", { style: { display: "flex", gap: "8px", fontSize: "13px", cursor: "pointer", listStyle: "none" } }, h("span", { className: "provider-settings-chevron", "aria-hidden": true }, "›"), "Advanced"),
+            h("div", { style: Object.assign({}, gridStyle, { marginTop: "16px" }) }, field("display_threshold_warn"), field("display_threshold_high"), field("codexbar_command")),
+            h("div", { style: { marginTop: "20px" } }, settingsStatusBody(host, Object.assign({}, state, { loading: saveState.loading || updateState.loading }), function () { load(true); }, updateCodexbar, updateState))),
+        ),
+        h("div", { style: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px" } },
+          h(ui.Button, { type: "button", disabled: busy || !Object.keys(changes).length, onClick: saveConfig }, saveState.loading ? "Saving settings…" : "Save settings"),
+          Object.keys(changes).length ? h(ui.Button, { type: "button", variant: "outline", disabled: busy, onClick: function () { setDraft({}); setSaveState({ loading: false, error: null, message: null }); } }, "Discard changes") : null,
+          saveState.message ? h("span", { role: "status", style: { fontSize: "12px" } }, saveState.message) : null,
+          saveState.error ? h("span", { role: "alert", style: { fontSize: "12px", color: COLOR.high } }, saveState.error) : null),
+      ),
+    );
   };
 }
 

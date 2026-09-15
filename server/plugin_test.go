@@ -76,6 +76,8 @@ func noLookPath(string) (string, error) { return "", errors.New("not found") }
 func newTestPlugin(t *testing.T, config map[string]any, sessions []pluginsdk.Session, run runner) *plugin {
 	t.Helper()
 	p := newPlugin()
+	p.cursor = nil         // Cursor auth and HTTP are opted into by integration tests.
+	p.scanProviders = nil  // Tests never discover the developer's installed providers.
 	p.disablePoller = true // build the snapshot synchronously in the webhook path
 	p.lookPath = noLookPath
 	p.run = run

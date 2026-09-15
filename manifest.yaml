@@ -1,6 +1,6 @@
 id: "kandev-provider-usage"
 api_version: 1
-version: "0.8.0"
+version: "0.8.2"
 display_name: "Provider Usage"
 description: "Subscription utilization for your agent providers — how much of each rate-limit window (5-hour / weekly / monthly) is used, with reset times and Codex manual reset credits. View usage in the shared top bar (including Threads), session top bar, or phone listing menu; the selected provider is remembered locally. Data comes from the codexbar CLI (plus Augment's Analytics API)."
 author: "kandev"
@@ -22,8 +22,21 @@ runtime:
 # session -> provider resolution happens server-side.
 capabilities:
   api_read: ["sessions"]
+  state: true # Remember the selected Cursor team across restarts and upgrades.
 
 webhooks:
+  - key: "discovery"
+    description: "Scan local provider connections without waiting for remote usage checks."
+    method: "GET"
+    access: authenticated
+  - key: "cursor-teams"
+    description: "List the signed-in Cursor account's teams by name and the saved selection."
+    method: "GET"
+    access: authenticated
+  - key: "cursor-team"
+    description: "Save a verified Cursor team selection and refresh its usage."
+    method: "POST"
+    access: authenticated
   - key: "update"
     description: "Update the managed CodexBar CLI to the latest stable release, verify it and persist the selection (POST)."
     method: "POST"
@@ -33,6 +46,7 @@ webhooks:
   - key: "providers"
     description: "Subscription utilization for every configured provider as JSON (GET; ?refresh=1 bypasses the cache)"
     method: "GET"
+    access: authenticated
   - key: "session"
     description: "Subscription utilization for the current session's provider (GET; ?task_id=&active=&refresh=1)"
     method: "GET"
@@ -48,7 +62,8 @@ ui:
 # operator saves, so changes take effect immediately.
 config_schema:
   type: object
-  # Fields render grouped by their key prefix: augment_ · codexbar_ · display_.
+# The custom editor groups these fields by detected provider; the schema
+# remains the host's validation, masking and fallback-form contract.
   properties:
     # ── Augment (optional) ────────────────────────────────────────────────
     augment_api_token:
@@ -57,20 +72,17 @@ config_schema:
       secret: true
       title: "Augment · API token"
       description: >-
-        Augment Analytics service-account token. Create one at
-        https://app.augmentcode.com/settings/personal-api-tokens. With the email
-        below, adds an Augment card + pill entry showing monthly consumption via
-        Augment's Analytics API. Stored as a secret.
+        Optional. Create an Analytics token at
+        https://app.augmentcode.com/settings/personal-api-tokens. Stored as a secret.
     augment_email:
       type: string
       title: "Augment · Account email"
       description: "Your Augment org email, used to filter Analytics to your usage."
     augment_monthly_budget:
       type: number
-      title: "Augment · Monthly budget (max)"
+      title: "Augment · Monthly budget"
       description: >-
-        Budget for the used-of-budget %. Precedence: this value → a per-user
-        Analytics budget override → a 2,500,000-credit default (credit plans).
+        Leave empty to use your Analytics budget, or the plan's default allowance.
     augment_resource:
       type: string
       enum: ["credits", "usd"]
@@ -78,47 +90,55 @@ config_schema:
       title: "Augment · Plan unit"
       description: "Whether your Augment plan is billed in credits or USD."
 
+    # ── Cursor (optional override) ────────────────────────────────────────
+    cursor_cookie_header:
+      type: string
+      format: password
+      secret: true
+      title: "Cursor · Session cookie"
+      description: >-
+        Usually empty: uses the Cursor app or CodexBar's manual cookie.
+        For a remote host, paste your cursor.com Cookie request header.
+        Save before reloading teams. Stored as a secret.
+
     # ── codexbar (data source) ────────────────────────────────────────────
     codexbar_command:
       type: string
-      title: "codexbar · CLI command"
+      title: "Usage · CLI command"
       description: >-
-        Path to the codexbar CLI. Empty = auto-detect (PATH, else a pinned
-        per-platform binary is downloaded once, SHA-256 verified) — including on
-        Windows, which uses the Win-CodexBar port's CLI. If resolution fails, the
-        Integration status card below shows what was tried and what to fix.
-        Use Update CodexBar on that card to install the latest stable release.
+        Usually empty: finds or downloads CodexBar automatically.
+        Set a path only to use your own CLI.
     codexbar_poll_minutes:
       type: number
       default: 5
-      title: "codexbar · Refresh interval (min)"
+      title: "Usage · Refresh every (minutes)"
       description: "How often usage refreshes in the background. Default 5, minimum 1."
     codexbar_providers:
       type: string
-      title: "codexbar · Providers to poll"
+      title: "Usage · Providers"
       description: >-
-        Comma-separated provider ids to poll, e.g. "claude,codex,gemini". Empty =
-        a curated local-credential set; "all" = every provider (much slower).
+        Leave empty for automatic detection, or enter names separated by commas
+        (for example, claude,codex,cursor). "all" checks every provider.
+    disabled_providers:
+      type: string
+      title: "Usage · Disabled providers"
+      description: "Managed by the Show usage switch in each provider's section."
 
     # ── Display ───────────────────────────────────────────────────────────
     display_pill_providers:
       type: string
-      title: "Display · Top-bar pill"
+      title: "Display · Status bar providers"
       description: >-
-        Providers included in the optional global status display,
-        comma-separated. Tokens: "current" (this session's provider), "all",
-        or explicit ids. Empty = current only. The session top-bar pill follows
-        the user's locally remembered panel selection.
+        Leave empty for the current session's provider. Use "all" or names
+        separated by commas. The top bar remembers its own tab selection.
     display_status_bar_mode:
       type: string
       enum: ["off", "percentage", "meter", "both"]
       default: "off"
-      title: "Display · Global status bar"
+      title: "Display · Status bar"
       description: >-
-        Status-bar presentation. "off" keeps provider usage in the session
-        top bar only; "percentage" shows the provider percentage; "meter" shows
-        the usage meter without a percentage; "both" shows meter and percentage.
-        Enabled modes also add readable rows to the phone Status drawer.
+        Optional percentage, meter, or both in the status bar and phone drawer.
+        Usage is always available in the top bar.
     display_threshold_warn:
       type: number
       default: 75
