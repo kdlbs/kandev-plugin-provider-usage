@@ -100,6 +100,24 @@ The CLI ZIP is currently unsigned, so the pinned checksum does not replace code
 signing or the need to trust the release publisher.
 Nothing has to be installed by hand on any platform.
 
+To update a managed CLI:
+
+1. Open **Settings → Plugins → Provider Usage**.
+2. Click **Update CodexBar** in the **Integration status** card.
+3. Wait for the version and success message to appear (up to two minutes).
+
+This explicitly opts into the latest stable release from the platform's release
+repository. The plugin verifies the archive against GitHub's SHA-256 asset digest
+and checks `--version` before selecting it. The selected version persists across
+plugin restarts; normal refreshes reuse it without checking GitHub. The original
+pinned build remains the default until you update. Previous binaries stay on disk,
+and a failed download, verification, startup check, or selection write keeps the
+previous version selected. **Re-check** refreshes status and usage; it does not
+upgrade the CLI.
+
+For a CLI configured in settings or found on `PATH`, update it with its existing
+installation method. The plugin does not replace externally managed binaries.
+
 When that fails, the plugin doesn't just go quiet: the **Integration status**
 card on the settings page shows which of those three paths was tried, the raw
 cause (including the failed command's first stderr line), and a hint naming the

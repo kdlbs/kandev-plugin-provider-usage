@@ -18,6 +18,7 @@ import (
 )
 
 const (
+	webhookKeyUpdate    = "update"
 	webhookKeyStatus    = "status"
 	webhookKeyProviders = "providers"
 	webhookKeySession   = "session"
@@ -79,10 +80,11 @@ var defaultProviders = []string{
 	"claude", "codex", "gemini", "grok", "copilot", "cursor", "opencodego", "amp",
 }
 
-// plugin implements pluginsdk.Plugin (via UnimplementedPlugin). Its four
+// plugin implements pluginsdk.Plugin (via UnimplementedPlugin). Its read
 // webhooks are relayed by kandev from
 // GET /api/plugins/kandev-provider-usage/webhooks/{status,providers,session,overview}
-// over gRPC; the plugin's UI bundle is the only intended caller.
+// over gRPC. POST /webhooks/update upgrades the managed CLI. The plugin's UI
+// bundle is the only intended caller.
 //
 // A background poller (started once the Host is injected) refreshes a single
 // snapshot of every provider's utilization every poll_interval minutes. All
@@ -209,6 +211,8 @@ func (p *plugin) HandleWebhook(ctx context.Context, req *pluginsdk.WebhookReques
 	refresh := query.Get("refresh") == "1"
 
 	switch req.WebhookKey {
+	case webhookKeyUpdate:
+		return p.updateWebhook(ctx, req.Method), nil
 	case webhookKeyStatus:
 		return jsonResponse(200, p.statusJSON(ctx, refresh)), nil
 	case webhookKeyProviders:

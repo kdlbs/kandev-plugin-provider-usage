@@ -24,6 +24,9 @@ capabilities:
   api_read: ["sessions"]
 
 webhooks:
+  - key: "update"
+    description: "Update the managed CodexBar CLI to the latest stable release, verify it and persist the selection (POST)."
+    method: "POST"
   - key: "status"
     description: "codexbar CLI install status: resolved command, source, version — or the failure stage, error and fix hint when it can't run (GET; ?refresh=1 re-probes)"
     method: "GET"
@@ -84,6 +87,7 @@ config_schema:
         per-platform binary is downloaded once, SHA-256 verified) — including on
         Windows, which uses the Win-CodexBar port's CLI. If resolution fails, the
         Integration status card below shows what was tried and what to fix.
+        Use Update CodexBar on that card to install the latest stable release.
     codexbar_poll_minutes:
       type: number
       default: 5
