@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.0] - 2026-09-16
+
+### Changed
+
+- Add provider settings, named Cursor teams, and detailed usage (#25) (39a6f8d)
+- feat: add managed CodexBar CLI updates (6412dbc)
+
+
 ## [0.8.0] - 2026-09-14
 
 ### Changed

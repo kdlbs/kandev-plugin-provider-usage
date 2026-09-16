@@ -348,7 +348,7 @@ the target platform's binary; `make package-host` on Linux cannot run on a Mac.
 The equivalent HTTP install, when the instance's authentication is disabled, is:
 
 ```sh
-curl -F package=@kandev-provider-usage-0.8.2.tar.gz \
+curl -F package=@kandev-provider-usage-0.9.0.tar.gz \
   http://localhost:8080/api/plugins/install
 ```
 
