@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/pkg/pluginsdk"
 	"github.com/stretchr/testify/require"
@@ -156,6 +157,71 @@ func TestCursorSelectedTeamDoesNotInferMissingQuotaOrAnotherMembersSpend(t *test
 	require.Equal(t, &UsageSpend{Used: 123.45, Limit: floatPtr(250), Currency: "USD"}, out.ExtraUsage)
 	_, err = cursorTeamMember(cursorDecode([]byte(`{"teamMemberSpend":[{"userId":42},{"userId":42}]}`)), 42, "")
 	require.ErrorContains(t, err, "multiple usage entries")
+}
+
+func TestCursorSelectedTeamAcceptsCurrentMemberSpendShapes(t *testing.T) {
+	t.Run("overall spend without legacy request fields", func(t *testing.T) {
+		c := cursorTestClient(t, cursorTeamFixtureHandler(t, map[string]string{
+			"/api/dashboard/teams": `{"teams":[{
+				"id":30677937,"name":"Selected team","pricingStrategy":"tokens",
+				"billingCycleStart":"2026-09-01T00:00:00Z",
+				"billingCycleEnd":"2026-10-01T00:00:00Z"
+			}]}`,
+			"/api/dashboard/get-team-spend": `{"teamId":30677937,"teamMemberSpend":[{
+				"userId":42,"email":"cursor@example.test","overallSpendCents":860,
+				"monthlyLimitDollars":30,"hardLimitOverrideDollars":200,
+				"effectivePerUserLimitDollars":30
+			}]}`,
+		}, nil))
+		out, err := c.fetch(context.Background(), map[string]any{cursorTeamSetting: cursorSelectedTeam}, cursorBase(t), cursorTestNow)
+		require.NoError(t, err)
+		require.Len(t, out.Windows, 1)
+		require.Equal(t, "Total Usage", out.Windows[0].Label)
+		require.InDelta(t, 28.6666667, out.Windows[0].UtilizationPct, 1e-7)
+		require.Equal(t, "$8.60 of $30.00 personal limit", out.Windows[0].Detail)
+		require.Equal(t, "2026-10-01T00:00:00Z", out.Windows[0].ResetAt.Format(time.RFC3339))
+		require.Equal(t, &UsageSpend{Used: 8.60, Limit: floatPtr(30), Currency: "USD", Label: "Total spend"}, out.ExtraUsage)
+		require.Equal(t, &Pace{
+			Stage: "behind", Summary: "3% in reserve | Expected 32% used",
+		}, out.PacePrime)
+		require.Equal(t, "Only selected-team usage is shown. Auto and API quotas were not reported for this team.", out.DetailWarning)
+	})
+
+	t.Run("tiered member percentages", func(t *testing.T) {
+		c := cursorTestClient(t, cursorTeamFixtureHandler(t, map[string]string{
+			"/api/dashboard/get-team-spend": `{"teamId":30677937,"teamMemberSpend":[{
+				"userId":42,"email":"cursor@example.test","spendCents":0,
+				"billingTier":"TIER_1000","totalPercentUsed":0.75,
+				"autoPercentUsed":1.2,"apiPercentUsed":0
+			}]}`,
+		}, nil))
+		out, err := c.fetch(context.Background(), map[string]any{cursorTeamSetting: cursorSelectedTeam}, cursorBase(t), cursorTestNow)
+		require.NoError(t, err)
+		require.Len(t, out.Windows, 3)
+		require.InDelta(t, 0.75, out.Windows[0].UtilizationPct, 1e-9)
+		require.InDelta(t, 1.2, out.Windows[1].UtilizationPct, 1e-9)
+		require.Zero(t, out.Windows[2].UtilizationPct)
+		require.Equal(t, &UsageSpend{Used: 0, Currency: "USD"}, out.ExtraUsage)
+		require.Equal(t, "Only selected-team usage is shown. Reset times were not reported for this team.", out.DetailWarning)
+		require.NotContains(t, out.DetailWarning, "Auto")
+		require.NotContains(t, out.DetailWarning, "API")
+	})
+}
+
+func TestCursorTeamMissingDetailsChecksQuotaRows(t *testing.T) {
+	reset := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	require.Empty(t, cursorTeamMissingDetails(&ProviderUsage{Windows: []UtilizationWindow{
+		{Label: "Total Usage", ResetAt: reset},
+		{Label: "Auto Usage"},
+		{Label: "API Usage"},
+	}}))
+	require.Equal(t,
+		"Only selected-team usage is shown. Auto quota was not reported for this team.",
+		cursorTeamMissingDetails(&ProviderUsage{Windows: []UtilizationWindow{
+			{Label: "Total Usage", ResetAt: reset},
+			{Label: "API Usage"},
+		}}),
+	)
 }
 
 func TestCursorConfiguredTeamID(t *testing.T) {

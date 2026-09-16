@@ -111,6 +111,24 @@ func TestWindowLabelFromMinutes(t *testing.T) {
 	require.Equal(t, "", windowLabelFromMinutes(0))
 }
 
+func TestCopilotMonthlyPaceFallback(t *testing.T) {
+	reset := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 9, 16, 10, 0, 0, 0, time.UTC)
+	pace := copilotMonthlyPace(UtilizationWindow{
+		Label: "Premium interactions", UtilizationPct: 12.4, ResetAt: reset,
+	}, now)
+	require.Equal(t, &Pace{
+		Stage: "behind", Summary: "39% in reserve | Expected 51% used",
+	}, pace)
+
+	require.Nil(t, copilotMonthlyPace(UtilizationWindow{
+		UtilizationPct: 0, ResetAt: reset,
+	}, time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)), "hide noisy pace during the first 3% of a window")
+	require.Nil(t, copilotMonthlyPace(UtilizationWindow{
+		UtilizationPct: 12.4, ResetAt: reset,
+	}, reset), "do not reuse an expired window")
+}
+
 func TestParseCodexbarUsage_Invalid(t *testing.T) {
 	_, err := parseCodexbarUsage([]byte("not json"))
 	require.Error(t, err)
@@ -188,7 +206,7 @@ func TestParseWinCodexbar_ZeroPercentAndInformationalWindow(t *testing.T) {
 
 	// used_percent 0 is a real reading, not an absent field.
 	require.Equal(t, 0.0, u.Windows[0].UtilizationPct)
-	require.Equal(t, "Primary", u.Windows[0].Label, "no window_minutes leaves the slot name")
+	require.Equal(t, "Premium interactions", u.Windows[0].Label)
 	require.Equal(t, "AI credits", u.Windows[1].Label)
 	require.Equal(t, "0 AI credits used", u.Windows[1].ResetDescription)
 	require.True(t, u.Windows[1].ResetAt.IsZero(), "no resets_at stays zero and is omitted on the wire")
