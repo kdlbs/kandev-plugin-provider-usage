@@ -279,17 +279,52 @@ func (c *cursorClient) fetchTeamUsage(ctx context.Context, auth cursorAuth, team
 		return nil, errors.New("No usage was reported for you in this team. Check the selected team and this account's access.")
 	}
 	if summary == nil {
-		hasReset := false
-		for _, window := range out.Windows {
-			hasReset = hasReset || !window.ResetAt.IsZero() || window.ResetDescription != ""
-		}
-		if hasReset {
-			out.DetailWarning = "Auto and API quotas were not reported for this team."
-		} else {
-			out.DetailWarning = "Only selected-team usage is shown. Additional quotas and reset times were not reported for this team."
-		}
+		out.DetailWarning = cursorTeamMissingDetails(out)
 	}
 	return out, nil
+}
+
+func cursorTeamMissingDetails(usage *ProviderUsage) string {
+	reported := map[string]bool{}
+	hasReset := false
+	for _, window := range usage.Windows {
+		reported[window.Label] = true
+		hasReset = hasReset || !window.ResetAt.IsZero() || window.ResetDescription != ""
+	}
+	missing := []string{}
+	for _, metric := range []struct {
+		label string
+		name  string
+	}{
+		{"Total Usage", "Total"},
+		{"Auto Usage", "Auto"},
+		{"API Usage", "API"},
+	} {
+		if !reported[metric.label] {
+			missing = append(missing, metric.name)
+		}
+	}
+	if len(missing) == 0 && hasReset {
+		return ""
+	}
+	detail := "Only selected-team usage is shown."
+	if len(missing) > 0 {
+		names := missing[0]
+		if len(missing) == 2 {
+			names = missing[0] + " and " + missing[1]
+		} else if len(missing) == 3 {
+			names = missing[0] + ", " + missing[1] + " and " + missing[2]
+		}
+		verb := "quota was"
+		if len(missing) > 1 {
+			verb = "quotas were"
+		}
+		detail += " " + names + " " + verb + " not reported for this team."
+	}
+	if !hasReset {
+		detail += " Reset times were not reported for this team."
+	}
+	return detail
 }
 
 func cursorTeamMember(spend cursorObject, userID int64, email string) (cursorObject, error) {

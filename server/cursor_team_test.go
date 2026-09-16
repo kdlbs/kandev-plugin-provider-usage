@@ -184,7 +184,7 @@ func TestCursorSelectedTeamAcceptsCurrentMemberSpendShapes(t *testing.T) {
 		require.Equal(t, &Pace{
 			Stage: "behind", Summary: "3% in reserve | Expected 32% used",
 		}, out.PacePrime)
-		require.Equal(t, "Auto and API quotas were not reported for this team.", out.DetailWarning)
+		require.Equal(t, "Only selected-team usage is shown. Auto and API quotas were not reported for this team.", out.DetailWarning)
 	})
 
 	t.Run("tiered member percentages", func(t *testing.T) {
@@ -202,7 +202,26 @@ func TestCursorSelectedTeamAcceptsCurrentMemberSpendShapes(t *testing.T) {
 		require.InDelta(t, 1.2, out.Windows[1].UtilizationPct, 1e-9)
 		require.Zero(t, out.Windows[2].UtilizationPct)
 		require.Equal(t, &UsageSpend{Used: 0, Currency: "USD"}, out.ExtraUsage)
+		require.Equal(t, "Only selected-team usage is shown. Reset times were not reported for this team.", out.DetailWarning)
+		require.NotContains(t, out.DetailWarning, "Auto")
+		require.NotContains(t, out.DetailWarning, "API")
 	})
+}
+
+func TestCursorTeamMissingDetailsChecksQuotaRows(t *testing.T) {
+	reset := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	require.Empty(t, cursorTeamMissingDetails(&ProviderUsage{Windows: []UtilizationWindow{
+		{Label: "Total Usage", ResetAt: reset},
+		{Label: "Auto Usage"},
+		{Label: "API Usage"},
+	}}))
+	require.Equal(t,
+		"Only selected-team usage is shown. Auto quota was not reported for this team.",
+		cursorTeamMissingDetails(&ProviderUsage{Windows: []UtilizationWindow{
+			{Label: "Total Usage", ResetAt: reset},
+			{Label: "API Usage"},
+		}}),
+	)
 }
 
 func TestCursorConfiguredTeamID(t *testing.T) {
