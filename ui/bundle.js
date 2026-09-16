@@ -322,9 +322,9 @@ function providerWindows(h, p, warn, high) {
   }
   // Missing plan-specific metrics are distinct from a reported 0% usage.
   var labels = ["Total Usage", "Auto Usage", "API Usage"];
-  var rows = labels.map(function (label) {
+  var rows = labels.map(function (label, index) {
     var w = windows.find(function (entry) { return entry.label === label; });
-    return h("div", { key: label }, w ? cleanWindow(h, w, warn, high, "", true) : h(
+    return h("div", { key: label }, w ? cleanWindow(h, w, warn, high, paceText(paceFor[index]), true) : h(
       "div", { style: { display: "flex", justifyContent: "space-between", gap: "8px", fontSize: "12px" } },
       h("span", { style: { fontWeight: 600 } }, label),
       h("span", { style: { color: "var(--muted-foreground)" } }, "Not reported"),
@@ -344,10 +344,13 @@ function spendAmount(amount, currency) {
 function cursorExtrasPanel(h, p) {
   if (p.provider !== "cursor") return null;
   var spend = p.extra_usage;
+  var spendLabel = spend && spend.label
+    ? spend.label
+    : spend && spend.scope === "team" ? "Extra Usage · team" : "Extra Usage";
   return h("section", { "aria-label": "Cursor usage details", style: { display: "flex", flexDirection: "column", gap: "12px", fontSize: "11px", fontVariantNumeric: "tabular-nums" } },
     h("div", { style: { display: "flex", flexDirection: "column", gap: "6px" } },
       h("div", { style: { display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "baseline" } },
-        h("span", { style: { fontSize: "12px", fontWeight: 600 } }, spend && spend.scope === "team" ? "Extra Usage · team" : "Extra Usage"),
+        h("span", { style: { fontSize: "12px", fontWeight: 600 } }, spendLabel),
         h("span", { style: { color: "var(--muted-foreground)", textAlign: "right" } }, spend ? spendAmount(spend.used, spend.currency) + " spent" : "Not reported"),
       ),
       spend && typeof spend.limit === "number" && spend.limit > 0

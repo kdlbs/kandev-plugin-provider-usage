@@ -272,6 +272,39 @@ test("Cursor team spend without a reported quota does not display a false zero p
   }
 });
 
+test("Cursor overall team spend is not mislabeled as extra usage", () => {
+  const { providerPanel } = statusMeterHelpers(cursorDetailNow);
+  const usage = {
+    provider: "cursor", team_id: "30677937",
+    windows: [{ label: "Total Usage", utilization_pct: 28.6667, detail: "$8.60 of $30.00 personal limit" }],
+    extra_usage: { used: 8.60, limit: 30, currency: "USD", label: "Total spend" },
+    pace_primary: { stage: "behind", summary: "3% in reserve | Expected 32% used" },
+  };
+  const panel = providerPanel({ jsx: element }, usage, 75, 90, "", () => {}, false);
+  const text = renderedText(panel);
+  assert.match(text, /Total Usage.*29% used.*\$8\.60 of \$30\.00 personal limit/);
+  assert.match(text, /3% in reserve/);
+  assert.match(text, /Total spend\$8\.60 spentLimit \$30\.00/);
+  assert.doesNotMatch(text, /Extra Usage/);
+  assert.equal(everyElement(panel, (node) => node.props.role === "meter").length, 1);
+});
+
+test("Copilot shows the premium-interaction reserve pace", () => {
+  const { providerPanel } = statusMeterHelpers(cursorDetailNow);
+  const panel = providerPanel({ jsx: element }, {
+    provider: "copilot", plan: "Business",
+    windows: [{
+      label: "Premium interactions", utilization_pct: 12.4,
+      reset_at: "2026-10-01T00:00:00Z",
+    }],
+    pace_primary: {
+      stage: "behind",
+      summary: "39% in reserve | Expected 51% used",
+    },
+  }, 75, 90, "", () => {}, false);
+  assert.match(renderedText(panel), /Premium interactions.*12% used.*39% in reserve/);
+});
+
 const resetCreditNow = Date.parse("2026-09-09T12:00:00Z");
 
 function codexPanel(resetCredits, now = resetCreditNow) {

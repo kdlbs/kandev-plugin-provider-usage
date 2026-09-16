@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"time"
 )
 
@@ -66,6 +67,9 @@ type UsageSpend struct {
 	Limit    *float64 `json:"limit,omitempty"`
 	Currency string   `json:"currency"`
 	Scope    string   `json:"scope,omitempty"` // "team" when this is shared spend
+	// Label overrides "Extra Usage" when Cursor reports a different spend
+	// category, such as overallSpendCents (included plus on-demand usage).
+	Label string `json:"label,omitempty"`
 }
 
 // --- codexbar JSON wire types (subset of `codexbar usage --format json`) ------
@@ -260,7 +264,52 @@ func (e cbEntry) toProviderUsage(now time.Time) *ProviderUsage {
 		pu.PacePrime = e.Pace.Primary.toPace()
 		pu.PaceSec = e.Pace.Secondary.toPace()
 	}
+	// CodexBar's Copilot API response currently carries a calendar-month reset
+	// but omits windowMinutes and pace. Derive the same linear reserve/deficit
+	// signal from the previous calendar-month boundary, without replacing pace
+	// if a future CodexBar version supplies it.
+	if e.Provider == "copilot" && pu.PacePrime == nil && len(pu.Windows) > 0 {
+		pu.PacePrime = copilotMonthlyPace(pu.Windows[0], now)
+	}
 	return pu
+}
+
+func copilotMonthlyPace(window UtilizationWindow, now time.Time) *Pace {
+	reset := window.ResetAt
+	if reset.IsZero() {
+		return nil
+	}
+	return linearUsagePace(window.UtilizationPct, reset.AddDate(0, -1, 0), reset, now)
+}
+
+func linearUsagePace(usedPct float64, start, reset, now time.Time) *Pace {
+	if start.IsZero() || reset.IsZero() {
+		return nil
+	}
+	if now.Before(start) || !now.Before(reset) {
+		return nil
+	}
+	duration := reset.Sub(start)
+	if duration <= 0 {
+		return nil
+	}
+	expected := now.Sub(start).Seconds() / duration.Seconds() * 100
+	// Match CodexBar's confidence guard: an early-window linear projection is
+	// too noisy to present as meaningful pace.
+	if expected < 3 {
+		return nil
+	}
+	delta := usedPct - expected
+	roundedDelta := math.Round(math.Abs(delta))
+	expectedText := fmt.Sprintf("Expected %.0f%% used", math.Round(expected))
+	switch {
+	case roundedDelta < 1:
+		return &Pace{Stage: "onPace", Summary: "On pace | " + expectedText}
+	case delta < 0:
+		return &Pace{Stage: "behind", Summary: fmt.Sprintf("%.0f%% in reserve | %s", roundedDelta, expectedText)}
+	default:
+		return &Pace{Stage: "ahead", Summary: fmt.Sprintf("%.0f%% in deficit | %s", roundedDelta, expectedText)}
+	}
 }
 
 func (u *cbUsage) planName() string {
@@ -279,9 +328,12 @@ func (u *cbUsage) windows(provider string) []UtilizationWindow {
 			continue
 		}
 		window := w.toWindow(defaultWindowLabel(i, w.WindowMinutes))
-		if provider == "cursor" {
+		switch provider {
+		case "cursor":
 			window.Label = []string{"Total Usage", "Auto Usage", "API Usage"}[i]
 			window.Scoped = i > 0
+		case "copilot":
+			window.Label = []string{"Premium interactions", "Chat", "Completions"}[i]
 		}
 		out = append(out, window)
 	}

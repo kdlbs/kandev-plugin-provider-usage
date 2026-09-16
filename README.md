@@ -79,13 +79,19 @@ a projected month-end total:
 - Each provider's panel shows its rate-limit windows as thin bars (calm indigo
   normally, warming to amber/coral only when high — never a hard red), a
   reset countdown, plan/source badges, and codexbar's pace summary
-  ("48% in reserve").
+  ("48% in reserve"). Copilot labels its primary window Premium interactions;
+  when CodexBar omits pace but supplies its monthly reset, the plugin derives
+  reserve or deficit against linear calendar-month consumption.
 - **Cursor details**: Total, Auto and API usage show the percentage used, with
   bars that fill as usage increases, reset times and extra spend.
   The backend supplements CodexBar with Cursor's dashboard endpoints,
   including Enterprise request allowances and personal spending
   caps. Missing metrics say "Not reported"; a failed optional lookup keeps
   the available quota visible. Shared team spend is explicitly labelled.
+  When Cursor reports only `overallSpendCents`, it is shown as Total spend
+  rather than being mislabeled as on-demand Extra Usage. Token-based Enterprise
+  teams also show total spend against the effective member limit as a usage bar,
+  with reserve or deficit calculated from the team's reported billing cycle.
 - **Codex manual resets**: the provider panel and phone Status drawer show
   available reset credits separately from the scheduled quota countdowns.
   A compact summary shows the available count and nearest expiry. Click, tap,

@@ -174,9 +174,49 @@ func (c *cursorClient) fetchTeamUsage(ctx context.Context, auth cursorAuth, team
 				out.Windows = windows
 			}
 		}
+		// Current tiered team responses report the authoritative percentages on
+		// the member row. These fields also cover plans that no longer expose
+		// fastPremiumRequests or requestQuotaPerSeat.
+		for _, metric := range []struct {
+			label  string
+			field  string
+			scoped bool
+		}{
+			{"Total Usage", "totalPercentUsed", false},
+			{"Auto Usage", "autoPercentUsed", true},
+			{"API Usage", "apiPercentUsed", true},
+		} {
+			pct := member.number(metric.field)
+			if pct == nil {
+				continue
+			}
+			window := UtilizationWindow{
+				Label: metric.label, UtilizationPct: *pct,
+				ResetAt: cursorBillingReset(summary), Scoped: metric.scoped,
+			}
+			replaced := false
+			for i := range out.Windows {
+				if out.Windows[i].Label == metric.label {
+					if window.ResetAt.IsZero() {
+						window.ResetAt = out.Windows[i].ResetAt
+						window.ResetDescription = out.Windows[i].ResetDescription
+					}
+					out.Windows[i] = window
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				out.Windows = append(out.Windows, window)
+			}
+		}
 		if cents := member.number("spendCents"); cents != nil {
 			personal := &UsageSpend{Used: *cents / 100, Currency: "USD"}
-			if limit := member.number("hardLimitOverrideDollars"); limit != nil {
+			if limit := firstCursorNumber(
+				member.number("effectivePerUserLimitDollars"),
+				member.number("monthlyLimitDollars"),
+				member.number("hardLimitOverrideDollars"),
+			); limit != nil {
 				if *limit > 0 {
 					personal.Limit = limit
 				}
@@ -184,13 +224,70 @@ func (c *cursorClient) fetchTeamUsage(ctx context.Context, auth cursorAuth, team
 				personal.Limit = out.ExtraUsage.Limit
 			}
 			out.ExtraUsage = personal
+		} else if cents := member.number("overallSpendCents"); cents != nil {
+			// Cursor's token-based Enterprise plans apply the effective member
+			// limit to total usage, including plan-covered spend. Other plans use
+			// the limit for on-demand spend only, so only token plans get a
+			// percentage derived from overallSpendCents.
+			usedDollars := *cents / 100
+			total := &UsageSpend{
+				Used: usedDollars, Currency: "USD", Label: "Total spend",
+			}
+			limit := firstCursorNumber(
+				member.number("effectivePerUserLimitDollars"),
+				member.number("monthlyLimitDollars"),
+				member.number("hardLimitOverrideDollars"),
+			)
+			tokenPlan := strings.EqualFold(team.text("pricingStrategy"), "tokens")
+			if tokenPlan && limit != nil && *limit > 0 {
+				total.Limit = limit
+			}
+			out.ExtraUsage = total
+			if tokenPlan && total.Limit != nil {
+				hasTotal := false
+				for _, window := range out.Windows {
+					hasTotal = hasTotal || window.Label == "Total Usage"
+				}
+				if !hasTotal {
+					pct := usedDollars / *total.Limit * 100
+					out.Windows = append([]UtilizationWindow{{
+						Label: "Total Usage", UtilizationPct: pct,
+						ResetAt: cursorBillingReset(team),
+						Detail:  fmt.Sprintf("$%.2f of $%.2f personal limit", usedDollars, *total.Limit),
+					}}, out.Windows...)
+				}
+			}
+		}
+	}
+	if out.PacePrime == nil {
+		start := team.date("billingCycleStart")
+		teamReset := cursorBillingReset(team)
+		for i := range out.Windows {
+			if out.Windows[i].Label != "Total Usage" {
+				continue
+			}
+			if out.Windows[i].ResetAt.IsZero() {
+				out.Windows[i].ResetAt = teamReset
+			}
+			out.PacePrime = linearUsagePace(
+				out.Windows[i].UtilizationPct, start, out.Windows[i].ResetAt, now,
+			)
+			break
 		}
 	}
 	if len(out.Windows) == 0 && out.ExtraUsage == nil {
 		return nil, errors.New("No usage was reported for you in this team. Check the selected team and this account's access.")
 	}
 	if summary == nil {
-		out.DetailWarning = "Only selected-team usage is shown. Additional quotas and reset times were not reported for this team."
+		hasReset := false
+		for _, window := range out.Windows {
+			hasReset = hasReset || !window.ResetAt.IsZero() || window.ResetDescription != ""
+		}
+		if hasReset {
+			out.DetailWarning = "Auto and API quotas were not reported for this team."
+		} else {
+			out.DetailWarning = "Only selected-team usage is shown. Additional quotas and reset times were not reported for this team."
+		}
 	}
 	return out, nil
 }
