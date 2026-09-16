@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1] - 2026-09-16
+
+### Changed
+
+- Fix Cursor team usage and improve pace details (#26) (2ce5529)
+
+
 ## [0.9.0] - 2026-09-16
 
 ### Changed
