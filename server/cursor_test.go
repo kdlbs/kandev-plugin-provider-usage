@@ -272,6 +272,43 @@ func TestCursorEnrichmentUsesSharedSnapshotAndHonorsAllowlist(t *testing.T) {
 	require.Equal(t, int32(4), count.Load())
 }
 
+func TestCursorDirectUsageSurvivesCodexbarInstallFailure(t *testing.T) {
+	var codexbarCalls, cursorCalls atomic.Int32
+	p := newTestPlugin(t, codexbarConfig(map[string]any{"codexbar_providers": "cursor"}), nil,
+		func(context.Context, string, ...string) ([]byte, error) {
+			codexbarCalls.Add(1)
+			return nil, errors.New("exec: codexbar: not found")
+		})
+	p.now = func() time.Time { return cursorTestNow }
+	p.cursor = cursorTestClient(t, cursorFixtureHandler(&cursorCalls))
+
+	report := p.pollOnce(context.Background(), 0)
+
+	require.False(t, report.Codexbar.Installed)
+	require.Equal(t, int32(1), codexbarCalls.Load(), "only the failed version probe reaches codexbar")
+	require.Equal(t, int32(4), cursorCalls.Load(), "identity and detail APIs are fetched directly")
+	require.Empty(t, report.Unavailable)
+	require.Len(t, report.Providers, 1)
+	require.Equal(t, "cursor", report.Providers[0].Provider)
+	require.Len(t, report.Providers[0].Windows, 3)
+}
+
+func TestCursorDirectFailureSurvivesCodexbarInstallFailure(t *testing.T) {
+	p := newTestPlugin(t, codexbarConfig(map[string]any{"codexbar_providers": "cursor"}), nil,
+		func(context.Context, string, ...string) ([]byte, error) {
+			return nil, errors.New("exec: codexbar: not found")
+		})
+	p.cursor = &cursorClient{auth: func(context.Context, map[string]any) (cursorAuth, error) {
+		return cursorAuth{}, errors.New(cursorDetailHint)
+	}}
+
+	report := p.pollOnce(context.Background(), 0)
+
+	require.False(t, report.Codexbar.Installed)
+	require.Empty(t, report.Providers)
+	require.Equal(t, []ProviderError{{Provider: "cursor", Message: cursorDetailHint}}, report.Unavailable)
+}
+
 func TestCursorAuthFailurePreservesBaselineAndOtherProviders(t *testing.T) {
 	p := newTestPlugin(t, codexbarConfig(map[string]any{"codexbar_providers": "cursor,claude"}), nil,
 		providerRunner(nil, map[string][]byte{"cursor": []byte(cursorEnterpriseCLI), "claude": []byte(sampleClaudeJSON)}))
