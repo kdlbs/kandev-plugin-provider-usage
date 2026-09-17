@@ -207,6 +207,64 @@ func TestCursorFetchFallsBackToAgentCLIAuth(t *testing.T) {
 	require.Equal(t, int32(2), identityCalls.Load())
 }
 
+func TestCursorFetchDoesNotSwitchAccountsAfterPrimaryUsageFailure(t *testing.T) {
+	var agentIdentityCalls atomic.Int32
+	c := cursorTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		desktop := strings.Contains(r.Header.Get("Cookie"), "desktop_user")
+		switch r.URL.Path {
+		case "/api/auth/me":
+			if desktop {
+				_, _ = w.Write([]byte(`{"sub":"desktop_user","email":"desktop@example.test"}`))
+				return
+			}
+			agentIdentityCalls.Add(1)
+			cursorFixtureHandler(nil)(w, r)
+		case "/api/usage-summary", "/api/usage", "/aiserver.v1.DashboardService/GetCurrentPeriodUsage":
+			if desktop || strings.HasPrefix(r.URL.Path, "/aiserver") {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			cursorFixtureHandler(nil)(w, r)
+		default:
+			cursorFixtureHandler(nil)(w, r)
+		}
+	})
+	desktop, err := cursorBearerAuth(cursorAuthFixtureFor("desktop_user"))
+	require.NoError(t, err)
+	agent, err := cursorBearerAuth(cursorAuthFixtureFor("user_test"))
+	require.NoError(t, err)
+	desktop.alternates = []cursorAuth{agent}
+	c.auth = func(context.Context, map[string]any) (cursorAuth, error) { return desktop, nil }
+
+	_, err = c.fetch(context.Background(), nil, nil, cursorTestNow)
+	require.ErrorContains(t, err, "did not return usable account usage")
+	require.Zero(t, agentIdentityCalls.Load(), "a quota failure must not silently switch to another account")
+}
+
+func TestCursorFetchReportsAgentLoadErrorOnlyWhenFallbackIsNeeded(t *testing.T) {
+	for _, testCase := range []struct {
+		name       string
+		statusCode int
+		want       string
+	}{
+		{name: "desktop rejected", statusCode: http.StatusUnauthorized, want: "Agent CLI saved session is unreadable"},
+		{name: "desktop service failure", statusCode: http.StatusServiceUnavailable, want: "Cursor returned HTTP 503"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			c := cursorTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(testCase.statusCode)
+			})
+			desktop, err := cursorBearerAuth(cursorAuthFixtureFor("desktop_user"))
+			require.NoError(t, err)
+			desktop.alternateErr = errors.New("Cursor Agent CLI saved session is unreadable")
+			c.auth = func(context.Context, map[string]any) (cursorAuth, error) { return desktop, nil }
+
+			_, err = c.fetch(context.Background(), nil, nil, cursorTestNow)
+			require.ErrorContains(t, err, testCase.want)
+		})
+	}
+}
+
 func TestCursorOptionalFailuresKeepQuotaAndDoNotLeakResponseBodies(t *testing.T) {
 	c := cursorTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/auth/me" {

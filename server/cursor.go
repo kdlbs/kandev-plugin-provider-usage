@@ -26,6 +26,12 @@ type cursorClient struct {
 	auth    func(context.Context, map[string]any) (cursorAuth, error)
 }
 
+var (
+	errCursorSessionRejected  = errors.New("Cursor session was rejected. Sign in again or update Cursor · Session cookie.")
+	errCursorIdentityRejected = fmt.Errorf("%w", errCursorSessionRejected)
+	errCursorAccountMismatch  = errors.New("Cursor details use a different or unverified account. Set Cursor · Session cookie for the account shown by CodexBar.")
+)
+
 func newCursorClient() *cursorClient {
 	client := &http.Client{
 		Timeout: 15 * time.Second,
@@ -71,7 +77,7 @@ func (c *cursorClient) request(ctx context.Context, auth cursorAuth, endpoint st
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return nil, errors.New("Cursor session was rejected. Sign in again or update Cursor · Session cookie.")
+		return nil, errCursorSessionRejected
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("Cursor returned HTTP %d.", resp.StatusCode)
@@ -92,15 +98,29 @@ func (c *cursorClient) fetch(ctx context.Context, cfg map[string]any, base *Prov
 	if err != nil {
 		return nil, err
 	}
-	candidates := append([]cursorAuth{auth}, auth.alternates...)
-	var lastErr error
-	for _, candidate := range candidates {
+	alternates := auth.alternates
+	alternateErr := auth.alternateErr
+	auth.alternates = nil
+	auth.alternateErr = nil
+	usage, err := c.fetchWithAuth(ctx, auth, teamID, base, now)
+	if err == nil {
+		return usage, nil
+	}
+	if !errors.Is(err, errCursorIdentityRejected) && !(base != nil && errors.Is(err, errCursorAccountMismatch)) {
+		return nil, err
+	}
+	lastErr := err
+	for _, candidate := range alternates {
 		candidate.alternates = nil
-		usage, err := c.fetchWithAuth(ctx, candidate, teamID, base, now)
-		if err == nil {
+		candidate.alternateErr = nil
+		usage, candidateErr := c.fetchWithAuth(ctx, candidate, teamID, base, now)
+		if candidateErr == nil {
 			return usage, nil
 		}
-		lastErr = err
+		lastErr = candidateErr
+	}
+	if alternateErr != nil {
+		return nil, alternateErr
 	}
 	return nil, lastErr
 }
@@ -108,6 +128,9 @@ func (c *cursorClient) fetch(ctx context.Context, cfg map[string]any, base *Prov
 func (c *cursorClient) fetchWithAuth(ctx context.Context, auth cursorAuth, teamID int64, base *ProviderUsage, now time.Time) (*ProviderUsage, error) {
 	raw, err := c.request(ctx, auth, "/api/auth/me", false, nil)
 	if err != nil {
+		if errors.Is(err, errCursorSessionRejected) {
+			return nil, errCursorIdentityRejected
+		}
 		return nil, err
 	}
 	identity := cursorDecode(raw)
@@ -131,7 +154,7 @@ func (c *cursorClient) fetchWithAuth(ctx context.Context, auth cursorAuth, teamI
 			matched = base.accountID == id
 		}
 		if !matched {
-			return nil, errors.New("Cursor details use a different or unverified account. Set Cursor · Session cookie for the account shown by CodexBar.")
+			return nil, errCursorAccountMismatch
 		}
 	}
 	// A pasted header can contain more than one kind of session cookie. Only

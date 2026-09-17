@@ -26,10 +26,11 @@ const cursorAgentKeychainTimeout = 5 * time.Second
 type cursorSecretRunner func(context.Context, string, ...string) ([]byte, error)
 
 type cursorAuth struct {
-	cookie     string
-	bearer     string
-	userID     string
-	alternates []cursorAuth
+	cookie       string
+	bearer       string
+	userID       string
+	alternates   []cursorAuth
+	alternateErr error
 }
 
 // Credentials stay in the backend. We read the existing session on every poll;
@@ -90,12 +91,16 @@ func loadAutomaticCursorAuth(
 	if agentErr == nil && agentToken != "" {
 		if auth, err := cursorBearerAuth(agentToken); err == nil {
 			candidates = append(candidates, auth)
-		} else if len(candidates) == 0 {
-			return cursorAuth{}, errors.New("Cursor Agent CLI's saved session is invalid. Run `agent login` again.")
+		} else {
+			agentErr = errors.New("Cursor Agent CLI's saved session is invalid. Run `agent login` again.")
 		}
 	}
 	if len(candidates) > 0 {
-		return combineCursorAuth(candidates), nil
+		auth := combineCursorAuth(candidates)
+		if agentFound && agentErr != nil {
+			auth.alternateErr = agentErr
+		}
+		return auth, nil
 	}
 	if agentFound && agentErr != nil {
 		return cursorAuth{}, agentErr
@@ -256,19 +261,25 @@ func readCursorAgentAccessToken(
 		return readCursorAgentAuthFile(path, readFile)
 	}
 
-	if run != nil {
-		keychainCtx, cancel := context.WithTimeout(ctx, cursorAgentKeychainTimeout)
-		_, presentErr := run(keychainCtx, "/usr/bin/security", "find-generic-password", "-s", "cursor-access-token", "-a", "cursor-user")
+	if run == nil {
+		return "", true, errors.New("Cannot inspect Cursor Agent CLI's macOS Keychain session.")
+	}
+	keychainCtx, cancel := context.WithTimeout(ctx, cursorAgentKeychainTimeout)
+	_, presentErr := run(keychainCtx, "/usr/bin/security", "find-generic-password", "-s", "cursor-access-token", "-a", "cursor-user")
+	cancel()
+	if presentErr == nil {
+		keychainCtx, cancel = context.WithTimeout(ctx, cursorAgentKeychainTimeout)
+		out, err := run(keychainCtx, "/usr/bin/security", "find-generic-password", "-s", "cursor-access-token", "-a", "cursor-user", "-w")
 		cancel()
-		if presentErr == nil {
-			keychainCtx, cancel = context.WithTimeout(ctx, cursorAgentKeychainTimeout)
-			out, err := run(keychainCtx, "/usr/bin/security", "find-generic-password", "-s", "cursor-access-token", "-a", "cursor-user", "-w")
-			cancel()
-			if err != nil || strings.TrimSpace(string(out)) == "" {
-				return "", true, errors.New("Cannot read Cursor Agent CLI's macOS Keychain session. Run `agent login` again and allow access.")
-			}
-			return strings.TrimSpace(string(out)), true, nil
+		if err != nil || strings.TrimSpace(string(out)) == "" {
+			return "", true, errors.New("Cannot read Cursor Agent CLI's macOS Keychain session. Run `agent login` again and allow access.")
 		}
+		return strings.TrimSpace(string(out)), true, nil
+	}
+	type exitCoder interface{ ExitCode() int }
+	var exitErr exitCoder
+	if !errors.As(presentErr, &exitErr) || exitErr.ExitCode() != 44 {
+		return "", true, errors.New("Cannot inspect Cursor Agent CLI's macOS Keychain session. Unlock Keychain and try again.")
 	}
 	return readCursorAgentAuthFile(path, readFile)
 }

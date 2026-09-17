@@ -22,6 +22,11 @@ func cursorAuthFixtureFor(user string) string {
 	return "header." + base64.RawURLEncoding.EncodeToString(payload) + ".signature"
 }
 
+type cursorTestExitError int
+
+func (e cursorTestExitError) Error() string { return "security command failed" }
+func (e cursorTestExitError) ExitCode() int { return int(e) }
+
 func TestCursorAuthCookieAndBearerSources(t *testing.T) {
 	token := cursorAuthFixture()
 	auth, err := cursorBearerAuth(token)
@@ -181,6 +186,13 @@ func TestCursorAutomaticAuthUsesAgentCLIAndRetainsDesktopFallback(t *testing.T) 
 	require.Equal(t, "desktop_user", auth.userID)
 	require.Len(t, auth.alternates, 1)
 	require.Equal(t, "agent_user", auth.alternates[0].userID)
+
+	require.NoError(t, os.WriteFile(agentPath, []byte(`{"accessToken":"","refreshToken":"unused"}`), 0600))
+	auth, err = loadAutomaticCursorAuth(context.Background(), "linux", home, env, os.ReadFile, nil, false)
+	require.NoError(t, err, "a valid Desktop session remains usable")
+	require.Equal(t, "desktop_user", auth.userID)
+	require.Empty(t, auth.alternates)
+	require.ErrorContains(t, auth.alternateErr, "saved session is invalid")
 }
 
 func TestCursorAgentExplicitTokenDoesNotFallBack(t *testing.T) {
@@ -231,12 +243,21 @@ func TestCursorAgentMacOSKeychainLookup(t *testing.T) {
 	require.NotContains(t, calls[0], "-w", "presence check must not request the secret")
 	require.Contains(t, calls[1], "-w")
 
+	notFound := func(context.Context, string, ...string) ([]byte, error) {
+		return nil, cursorTestExitError(44)
+	}
+	_, found, err = readCursorAgentAccessToken(context.Background(), "darwin", "/home/test", func(string) string { return "" }, missing, notFound, true)
+	require.NoError(t, err, "an absent Keychain item may fall back to the file store")
+	require.False(t, found)
+
 	denied := func(context.Context, string, ...string) ([]byte, error) {
 		return nil, errors.New("credential=DO-NOT-EXPOSE")
 	}
-	_, found, err = readCursorAgentAccessToken(context.Background(), "darwin", "/home/test", func(string) string { return "" }, missing, denied, true)
-	require.NoError(t, err, "a missing keychain item and auth file is an absent session")
-	require.False(t, found)
+	got, found, err = readCursorAgentAccessToken(context.Background(), "darwin", "/home/test", func(string) string { return "" }, fileAuth, denied, true)
+	require.ErrorContains(t, err, "Cannot inspect")
+	require.True(t, found)
+	require.Empty(t, got, "a stale file must not replace a Keychain session after an inspection failure")
+	require.NotContains(t, err.Error(), "DO-NOT-EXPOSE")
 }
 
 func TestCursorSQLiteReadsOnlyAccessTokenWithoutCreatingMissingDatabase(t *testing.T) {
