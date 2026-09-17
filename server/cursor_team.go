@@ -119,6 +119,7 @@ func (c *cursorClient) fetchTeamUsage(ctx context.Context, auth cursorAuth, team
 		{"/api/usage-summary", nil},
 	}
 	results := make([]cursorObject, len(endpoints))
+	resultErrs := make([]error, len(endpoints))
 	var wg sync.WaitGroup
 	for i, endpoint := range endpoints {
 		wg.Add(1)
@@ -126,6 +127,8 @@ func (c *cursorClient) fetchTeamUsage(ctx context.Context, auth cursorAuth, team
 			defer wg.Done()
 			if raw, err := c.request(ctx, auth, endpoint.path, false, endpoint.body); err == nil {
 				results[i] = cursorDecode(raw)
+			} else {
+				resultErrs[i] = err
 			}
 		}()
 	}
@@ -276,6 +279,11 @@ func (c *cursorClient) fetchTeamUsage(ctx context.Context, auth cursorAuth, team
 		}
 	}
 	if len(out.Windows) == 0 && out.ExtraUsage == nil {
+		for _, resultErr := range resultErrs {
+			if errors.Is(resultErr, errCursorSessionRejected) {
+				return nil, errCursorSessionRejected
+			}
+		}
 		return nil, errors.New("No usage was reported for you in this team. Check the selected team and this account's access.")
 	}
 	if summary == nil {

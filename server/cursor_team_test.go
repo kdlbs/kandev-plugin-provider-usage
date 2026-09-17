@@ -105,6 +105,34 @@ func TestCursorTeamSelectionUsesRequestedTeamAndCurrentMember(t *testing.T) {
 	require.NotContains(t, string(raw), "example.test")
 }
 
+func TestCursorTeamAuthRejectionFallsBackToSameAgentAccount(t *testing.T) {
+	var identityCalls atomic.Int32
+	fixture := cursorTeamFixtureHandler(t, nil, nil)
+	c := cursorTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/auth/me" {
+			identityCalls.Add(1)
+			fixture(w, r)
+			return
+		}
+		if identityCalls.Load() == 1 && r.URL.Path == "/api/dashboard/teams" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		fixture(w, r)
+	})
+	desktop, err := cursorBearerAuth(cursorAuthFixtureFor("user_test"))
+	require.NoError(t, err)
+	agent, err := cursorBearerAuth(cursorAuthFixtureFor("user_test"))
+	require.NoError(t, err)
+	desktop.alternates = []cursorAuth{agent}
+	c.auth = func(context.Context, map[string]any) (cursorAuth, error) { return desktop, nil }
+
+	out, err := c.fetch(context.Background(), map[string]any{cursorTeamSetting: cursorSelectedTeam}, nil, cursorTestNow)
+	require.NoError(t, err)
+	require.Equal(t, cursorSelectedTeam, out.TeamID)
+	require.Equal(t, int32(2), identityCalls.Load())
+}
+
 func TestCursorSelectedTeamOnlyKeepsSummaryWithMatchingScope(t *testing.T) {
 	for _, scope := range []string{`"teamId":30677937,`, `"teamId":"30677937",`, `"teamUsage":{"teamId":30677937},`, ``, `"teamId":30677936,`, `"teamId":null,`} {
 		t.Run(scope, func(t *testing.T) {

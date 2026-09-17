@@ -241,6 +241,53 @@ func TestCursorFetchDoesNotSwitchAccountsAfterPrimaryUsageFailure(t *testing.T) 
 	require.Zero(t, agentIdentityCalls.Load(), "a quota failure must not silently switch to another account")
 }
 
+func TestCursorFetchRetriesDownstreamRejectionOnlyForSameAccount(t *testing.T) {
+	for _, testCase := range []struct {
+		name      string
+		agentUser string
+		wantErr   string
+	}{
+		{name: "same account", agentUser: "desktop_user"},
+		{name: "different account", agentUser: "agent_user", wantErr: "signed in to different accounts"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			var identityCalls atomic.Int32
+			c := cursorTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/auth/me" {
+					call := identityCalls.Add(1)
+					user := "desktop_user"
+					if call > 1 {
+						user = testCase.agentUser
+					}
+					_, _ = w.Write([]byte(`{"sub":"` + user + `","email":"` + user + `@example.test"}`))
+					return
+				}
+				if identityCalls.Load() == 1 {
+					w.WriteHeader(http.StatusUnauthorized)
+					return
+				}
+				cursorFixtureHandler(nil)(w, r)
+			})
+			desktop, err := cursorBearerAuth(cursorAuthFixtureFor("desktop_user"))
+			require.NoError(t, err)
+			agent, err := cursorBearerAuth(cursorAuthFixtureFor(testCase.agentUser))
+			require.NoError(t, err)
+			desktop.alternates = []cursorAuth{agent}
+			c.auth = func(context.Context, map[string]any) (cursorAuth, error) { return desktop, nil }
+
+			out, err := c.fetch(context.Background(), nil, nil, cursorTestNow)
+			if testCase.wantErr != "" {
+				require.ErrorContains(t, err, testCase.wantErr)
+				require.Nil(t, out)
+			} else {
+				require.NoError(t, err)
+				require.Len(t, out.Windows, 3)
+			}
+			require.Equal(t, int32(2), identityCalls.Load())
+		})
+	}
+}
+
 func TestCursorFetchReportsAgentLoadErrorOnlyWhenFallbackIsNeeded(t *testing.T) {
 	for _, testCase := range []struct {
 		name       string
