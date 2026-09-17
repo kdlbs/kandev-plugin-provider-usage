@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.3] - 2026-09-17
+
+### Changed
+
+- Use Cursor Agent CLI authentication (#28) (3615180)
+
+
 ## [0.9.2] - 2026-09-17
 
 ### Changed
