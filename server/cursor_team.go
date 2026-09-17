@@ -133,6 +133,11 @@ func (c *cursorClient) fetchTeamUsage(ctx context.Context, auth cursorAuth, team
 		}()
 	}
 	wg.Wait()
+	for _, resultErr := range resultErrs {
+		if errors.Is(resultErr, errCursorSessionRejected) {
+			return nil, errCursorSessionRejected
+		}
+	}
 	details, spend, summary := results[0], results[1], results[2]
 	for _, payload := range []cursorObject{details, spend} {
 		if reported, present := cursorResponseTeamID(payload); present && reported != teamID {
@@ -279,11 +284,6 @@ func (c *cursorClient) fetchTeamUsage(ctx context.Context, auth cursorAuth, team
 		}
 	}
 	if len(out.Windows) == 0 && out.ExtraUsage == nil {
-		for _, resultErr := range resultErrs {
-			if errors.Is(resultErr, errCursorSessionRejected) {
-				return nil, errCursorSessionRejected
-			}
-		}
 		return nil, errors.New("No usage was reported for you in this team. Check the selected team and this account's access.")
 	}
 	if summary == nil {

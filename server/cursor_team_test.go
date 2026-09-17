@@ -105,7 +105,7 @@ func TestCursorTeamSelectionUsesRequestedTeamAndCurrentMember(t *testing.T) {
 	require.NotContains(t, string(raw), "example.test")
 }
 
-func TestCursorTeamAuthRejectionFallsBackToSameAgentAccount(t *testing.T) {
+func TestCursorTeamMixedAuthRejectionFallsBackToSameAgentAccount(t *testing.T) {
 	var identityCalls atomic.Int32
 	fixture := cursorTeamFixtureHandler(t, nil, nil)
 	c := cursorTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -114,7 +114,7 @@ func TestCursorTeamAuthRejectionFallsBackToSameAgentAccount(t *testing.T) {
 			fixture(w, r)
 			return
 		}
-		if identityCalls.Load() == 1 && r.URL.Path == "/api/dashboard/teams" {
+		if identityCalls.Load() == 1 && r.URL.Path == "/api/usage-summary" {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}

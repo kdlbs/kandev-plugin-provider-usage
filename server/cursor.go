@@ -221,16 +221,14 @@ func (c *cursorClient) fetchWithAuth(ctx context.Context, auth cursorAuth, teamI
 		}()
 	}
 	wg.Wait()
-	summary, rpc, requests := cursorDecode(results[0]), cursorDecode(results[1]), cursorDecode(results[2])
-	if len(summary) == 0 && len(rpc) == 0 && len(requests) == 0 {
-		for _, resultErr := range resultErrs {
-			if errors.Is(resultErr, errCursorSessionRejected) {
-				return nil, &cursorAuthFallbackError{
-					err: errCursorSessionRejected, account: cursorAccount{id: id, email: email},
-				}
+	for _, resultErr := range resultErrs {
+		if errors.Is(resultErr, errCursorSessionRejected) {
+			return nil, &cursorAuthFallbackError{
+				err: errCursorSessionRejected, account: cursorAccount{id: id, email: email},
 			}
 		}
 	}
+	summary, rpc, requests := cursorDecode(results[0]), cursorDecode(results[1]), cursorDecode(results[2])
 	out := mapCursorUsage(base, summary, rpc, requests, now)
 	if len(out.Windows) == 0 && out.ExtraUsage == nil {
 		return nil, errors.New("Cursor did not return usable account usage.")

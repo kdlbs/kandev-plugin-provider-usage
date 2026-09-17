@@ -262,7 +262,7 @@ func TestCursorFetchRetriesDownstreamRejectionOnlyForSameAccount(t *testing.T) {
 					_, _ = w.Write([]byte(`{"sub":"` + user + `","email":"` + user + `@example.test"}`))
 					return
 				}
-				if identityCalls.Load() == 1 {
+				if identityCalls.Load() == 1 && r.URL.Path != "/api/usage-summary" {
 					w.WriteHeader(http.StatusUnauthorized)
 					return
 				}
