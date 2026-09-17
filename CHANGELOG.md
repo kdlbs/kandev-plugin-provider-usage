@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2] - 2026-09-17
+
+### Changed
+
+- Keep Cursor usage available without CodexBar (#27) (698b31d)
+
+
 ## [0.9.1] - 2026-09-16
 
 ### Changed

@@ -1,6 +1,6 @@
 id: "kandev-provider-usage"
 api_version: 1
-version: "0.9.1"
+version: "0.9.2"
 display_name: "Provider Usage"
 description: "Subscription utilization for your agent providers — how much of each rate-limit window (5-hour / weekly / monthly) is used, with reset times and Codex manual reset credits. View usage in the shared top bar (including Threads), session top bar, or phone listing menu; the selected provider is remembered locally. Data comes from the codexbar CLI (plus Augment's Analytics API)."
 author: "kandev"
