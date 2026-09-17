@@ -119,6 +119,7 @@ func (c *cursorClient) fetchTeamUsage(ctx context.Context, auth cursorAuth, team
 		{"/api/usage-summary", nil},
 	}
 	results := make([]cursorObject, len(endpoints))
+	resultErrs := make([]error, len(endpoints))
 	var wg sync.WaitGroup
 	for i, endpoint := range endpoints {
 		wg.Add(1)
@@ -126,10 +127,17 @@ func (c *cursorClient) fetchTeamUsage(ctx context.Context, auth cursorAuth, team
 			defer wg.Done()
 			if raw, err := c.request(ctx, auth, endpoint.path, false, endpoint.body); err == nil {
 				results[i] = cursorDecode(raw)
+			} else {
+				resultErrs[i] = err
 			}
 		}()
 	}
 	wg.Wait()
+	for _, resultErr := range resultErrs {
+		if errors.Is(resultErr, errCursorSessionRejected) {
+			return nil, errCursorSessionRejected
+		}
+	}
 	details, spend, summary := results[0], results[1], results[2]
 	for _, payload := range []cursorObject{details, spend} {
 		if reported, present := cursorResponseTeamID(payload); present && reported != teamID {

@@ -26,6 +26,28 @@ type cursorClient struct {
 	auth    func(context.Context, map[string]any) (cursorAuth, error)
 }
 
+var (
+	errCursorSessionRejected   = errors.New("Cursor session was rejected. Sign in again or update Cursor · Session cookie.")
+	errCursorAccountMismatch   = errors.New("Cursor details use a different or unverified account. Set Cursor · Session cookie for the account shown by CodexBar.")
+	errCursorAlternateMismatch = errors.New("Cursor Desktop and Agent CLI are signed in to different accounts. Sign in to the same account or set Cursor · Session cookie explicitly.")
+)
+
+type cursorAccount struct {
+	id    string
+	email string
+}
+
+// cursorAuthFallbackError marks an authentication rejection for which another
+// automatic credential may be tried. Once the primary identity is known, the
+// alternate must prove it belongs to that same account.
+type cursorAuthFallbackError struct {
+	err     error
+	account cursorAccount
+}
+
+func (e *cursorAuthFallbackError) Error() string { return e.err.Error() }
+func (e *cursorAuthFallbackError) Unwrap() error { return e.err }
+
 func newCursorClient() *cursorClient {
 	client := &http.Client{
 		Timeout: 15 * time.Second,
@@ -71,7 +93,7 @@ func (c *cursorClient) request(ctx context.Context, auth cursorAuth, endpoint st
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return nil, errors.New("Cursor session was rejected. Sign in again or update Cursor · Session cookie.")
+		return nil, errCursorSessionRejected
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("Cursor returned HTTP %d.", resp.StatusCode)
@@ -92,8 +114,46 @@ func (c *cursorClient) fetch(ctx context.Context, cfg map[string]any, base *Prov
 	if err != nil {
 		return nil, err
 	}
+	alternates := auth.alternates
+	alternateErr := auth.alternateErr
+	auth.alternates = nil
+	auth.alternateErr = nil
+	usage, err := c.fetchWithAuth(ctx, auth, teamID, base, nil, now)
+	if err == nil {
+		return usage, nil
+	}
+	var fallbackErr *cursorAuthFallbackError
+	canFallback := errors.As(err, &fallbackErr) || base != nil && errors.Is(err, errCursorAccountMismatch)
+	if !canFallback {
+		return nil, err
+	}
+	var expected *cursorAccount
+	if fallbackErr != nil && (fallbackErr.account.id != "" || fallbackErr.account.email != "") {
+		account := fallbackErr.account
+		expected = &account
+	}
+	lastErr := err
+	for _, candidate := range alternates {
+		candidate.alternates = nil
+		candidate.alternateErr = nil
+		usage, candidateErr := c.fetchWithAuth(ctx, candidate, teamID, base, expected, now)
+		if candidateErr == nil {
+			return usage, nil
+		}
+		lastErr = candidateErr
+	}
+	if alternateErr != nil {
+		return nil, alternateErr
+	}
+	return nil, lastErr
+}
+
+func (c *cursorClient) fetchWithAuth(ctx context.Context, auth cursorAuth, teamID int64, base *ProviderUsage, expected *cursorAccount, now time.Time) (*ProviderUsage, error) {
 	raw, err := c.request(ctx, auth, "/api/auth/me", false, nil)
 	if err != nil {
+		if errors.Is(err, errCursorSessionRejected) {
+			return nil, &cursorAuthFallbackError{err: err}
+		}
 		return nil, err
 	}
 	identity := cursorDecode(raw)
@@ -111,13 +171,12 @@ func (c *cursorClient) fetch(ctx context.Context, cfg map[string]any, base *Prov
 	if id == "" && email == "" {
 		return nil, errors.New("Cursor did not report an account identity for its usage details.")
 	}
+	if expected != nil && !cursorAccountMatches(expected.id, expected.email, id, email) {
+		return nil, errCursorAlternateMismatch
+	}
 	if base != nil {
-		matched := base.accountEmail != "" && email != "" && strings.EqualFold(base.accountEmail, email)
-		if base.accountID != "" && id != "" {
-			matched = base.accountID == id
-		}
-		if !matched {
-			return nil, errors.New("Cursor details use a different or unverified account. Set Cursor · Session cookie for the account shown by CodexBar.")
+		if !cursorAccountMatches(base.accountID, base.accountEmail, id, email) {
+			return nil, errCursorAccountMismatch
 		}
 	}
 	// A pasted header can contain more than one kind of session cookie. Only
@@ -131,7 +190,11 @@ func (c *cursorClient) fetch(ctx context.Context, cfg map[string]any, base *Prov
 	if teamID != 0 {
 		out, err := c.fetchTeamUsage(ctx, auth, teamID, email, now)
 		if err != nil {
-			return nil, fmt.Errorf("Cursor team %d: %w", teamID, err)
+			wrapped := fmt.Errorf("Cursor team %d: %w", teamID, err)
+			if errors.Is(err, errCursorSessionRejected) {
+				return nil, &cursorAuthFallbackError{err: wrapped, account: cursorAccount{id: id, email: email}}
+			}
+			return nil, wrapped
 		}
 		out.accountID, out.accountEmail = id, email
 		return out, nil
@@ -145,6 +208,7 @@ func (c *cursorClient) fetch(ctx context.Context, cfg map[string]any, base *Prov
 		{path: "/api/usage?" + url.Values{"user": {id}}.Encode()},
 	}
 	results := make([][]byte, len(endpoints))
+	resultErrs := make([]error, len(endpoints))
 	var wg sync.WaitGroup
 	for i, endpoint := range endpoints {
 		if endpoint.rpc && auth.bearer == "" || i == 2 && id == "" {
@@ -153,10 +217,17 @@ func (c *cursorClient) fetch(ctx context.Context, cfg map[string]any, base *Prov
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			results[i], _ = c.request(ctx, auth, endpoint.path, endpoint.rpc, nil)
+			results[i], resultErrs[i] = c.request(ctx, auth, endpoint.path, endpoint.rpc, nil)
 		}()
 	}
 	wg.Wait()
+	for _, resultErr := range resultErrs {
+		if errors.Is(resultErr, errCursorSessionRejected) {
+			return nil, &cursorAuthFallbackError{
+				err: errCursorSessionRejected, account: cursorAccount{id: id, email: email},
+			}
+		}
+	}
 	summary, rpc, requests := cursorDecode(results[0]), cursorDecode(results[1]), cursorDecode(results[2])
 	out := mapCursorUsage(base, summary, rpc, requests, now)
 	if len(out.Windows) == 0 && out.ExtraUsage == nil {
@@ -167,6 +238,14 @@ func (c *cursorClient) fetch(ctx context.Context, cfg map[string]any, base *Prov
 		out.DetailWarning = "Detailed quotas unavailable; showing the available quota."
 	}
 	return out, nil
+}
+
+func cursorAccountMatches(wantID, wantEmail, gotID, gotEmail string) bool {
+	matched := wantEmail != "" && gotEmail != "" && strings.EqualFold(wantEmail, gotEmail)
+	if wantID != "" && gotID != "" {
+		matched = wantID == gotID
+	}
+	return matched
 }
 
 // cursorObject decodes optional dashboard fields independently: omitted/null

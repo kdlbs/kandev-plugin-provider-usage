@@ -175,6 +175,7 @@ test("settings groups only discovered providers, keeping a signed-out installed 
   assert.deepEqual(sections.map(n => n.props["data-provider-settings"]), ["claude", "codex", "cursor", "copilot"]);
   assert.equal(nodes(tree, n => n.type === "function").length, 0);
   assert.ok(settingsInput(sections.find(n => n.props["data-provider-settings"] === "cursor"), "cursor_cookie_header"));
+  assert.equal(settingsInput(sections.find(n => n.props["data-provider-settings"] === "cursor"), "cursor_agent_keychain").props.value, "off");
   assert.match(text(sections.find(n => n.props["data-provider-settings"] === "copilot")), /Sign in to Copilot/);
   assert.equal(settingsInput(tree, "augment_api_token"), undefined);
   assert.equal(tree.props["data-ready"], true);
@@ -194,17 +195,18 @@ test("settings never adds a Cursor section or team request when Cursor is absent
 test("configuration save merges edited fields into latest settings and preserves masked secrets", async () => {
   const app = mount("plugin-settings");
   let tree = await loadSettings(app, { ...snapshot, detected_providers: [{ provider: "cursor", via: "app" }] }, {
-    cursor_cookie_header: "********", augment_api_token: "********", codexbar_poll_minutes: 5, display_status_bar_mode: "off",
+    cursor_cookie_header: "********", cursor_agent_keychain: "off", augment_api_token: "********", codexbar_poll_minutes: 5, display_status_bar_mode: "off",
   });
   assert.equal(settingsInput(tree, "cursor_cookie_header").props.value, "");
   assert.equal(settingsInput(tree, "cursor_cookie_header").props.placeholder, "Saved securely");
+  settingsInput(tree, "cursor_agent_keychain").props.onChange({ target: { value: "on" } });
   settingsInput(tree, "codexbar_poll_minutes").props.onChange({ target: { value: "8" } });
   saveSettings(app.render()).props.onClick();
   saveSettings(tree).props.onClick();
   assert.equal(app.requests.at(-1).url, "config");
   const count = app.requests.length;
   app.requests.at(-1).resolve({ config: {
-    cursor_cookie_header: "********", augment_api_token: "********", codexbar_poll_minutes: 5, display_status_bar_mode: "both", unrelated: "keep",
+    cursor_cookie_header: "********", cursor_agent_keychain: "off", augment_api_token: "********", codexbar_poll_minutes: 5, display_status_bar_mode: "both", unrelated: "keep",
   } }); await flush();
   assert.equal(app.requests.length, count + 1);
   const request = app.requests.at(-1);
@@ -212,7 +214,7 @@ test("configuration save merges edited fields into latest settings and preserves
   assert.equal(request.init.method, "PATCH");
   assert.equal(request.init.credentials, "include");
   assert.deepEqual(JSON.parse(request.init.body).config, {
-    cursor_cookie_header: "********", augment_api_token: "********", codexbar_poll_minutes: 8, display_status_bar_mode: "both", unrelated: "keep",
+    cursor_cookie_header: "********", cursor_agent_keychain: "on", augment_api_token: "********", codexbar_poll_minutes: 8, display_status_bar_mode: "both", unrelated: "keep",
   });
   request.resolve({ updated: true }); await flush();
   tree = app.render();

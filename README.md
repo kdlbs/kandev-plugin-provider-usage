@@ -114,8 +114,9 @@ a projected month-end total:
   **Refresh** rebuilds the snapshot. Each refresh tries codexbar's fast `oauth`
   source first, falling back to the agent CLI only when needed.
 - **Local sign-in**: OAuth providers reuse credentials on the machine running
-  Kandev (`~/.claude`, `~/.codex`, …). Cursor can use its app session or a
-  configured dashboard cookie; Augment uses an Analytics token.
+  Kandev (`~/.claude`, `~/.codex`, …). Cursor can use its Desktop session,
+  Cursor Agent CLI login, or a configured dashboard cookie; Augment uses an
+  Analytics token.
 
 ## codexbar distribution
 
@@ -203,7 +204,8 @@ Configuration keys (retained for compatibility with existing installations):
 | `augment_email`             | Your Augment org email, used to filter Analytics to your usage.                                             |
 | `augment_monthly_budget`    | Budget for the used-of-budget %. Empty = a per-user Analytics override, else a 2,500,000-credit default.   |
 | `augment_resource`          | `credits` (default) or `usd` — which metric your Augment plan bills.                                        |
-| `cursor_cookie_header`      | Optional Cursor dashboard Cookie request header, stored as a secret. Overrides automatic detail authentication; must match the account shown by CodexBar. Useful for a remote Kandev host. |
+| `cursor_cookie_header`      | Optional Cursor dashboard Cookie request header, stored as a secret. Overrides automatic Desktop and Agent CLI authentication; must match the account shown by CodexBar. Useful for a remote Kandev host. |
+| `cursor_agent_keychain`     | `off` (default) or `on`. On macOS, opt in to reading the access token saved by `agent login`; Keychain may ask once. Linux and Windows Agent auth files are read automatically. |
 | `codexbar_command`          | Explicit codexbar command. Empty = auto-detect / auto-download.                                             |
 | `codexbar_poll_minutes`     | Background refresh interval (default 5, minimum 1).                                                          |
 | `codexbar_providers`        | Comma-separated provider ids to poll. Empty = curated local-credential set; `"all"` = full sweep (slower).  |
@@ -279,12 +281,24 @@ resolved on the machine running the plugin, in this order:
    `~/.codexbar/config.json`. An explicit `cookieSource: "off"` disables
    automatic details; an empty/invalid manual cookie does not select another
    account.
-3. Cursor's local `User/globalStorage/state.vscdb`: under
+3. Cursor Agent CLI's explicit `CURSOR_AUTH_TOKEN`, when inherited by the
+   plugin process.
+4. Cursor Desktop's local `User/globalStorage/state.vscdb`: under
    `~/Library/Application Support/Cursor` on macOS, `$XDG_CONFIG_HOME/Cursor`
    (default `~/.config/Cursor`) on Linux, or `%APPDATA%\Cursor` on Windows.
+5. The session saved by `agent login`: when **Cursor · Agent CLI Keychain** is
+   enabled, the `cursor-access-token` item for account `cursor-user` in macOS
+   login Keychain;
+   `$XDG_CONFIG_HOME/cursor/auth.json` (default `~/.config/cursor/auth.json`)
+   on Linux, or `%APPDATA%\Cursor\auth.json` on Windows. A macOS Agent
+   configured with `AGENT_CLI_CREDENTIAL_STORE=file` uses
+   `~/.cursor/auth.json`.
 
-Cursor detail authentication does not read macOS Keychain. If the local app
-session is unavailable, set **Cursor · Session cookie** to enable the details.
+When both automatic local sessions are available, Desktop is tried first and
+Agent CLI is retained as a fallback if that session is rejected. On macOS the
+plugin leaves Keychain untouched until access is enabled in settings. It then
+checks that the expected item exists without requesting its secret before the
+read; macOS may ask the signed-in user to allow that read.
 
 For a remote host, sign into `cursor.com` in your browser, open DevTools →
 Network, select a dashboard request and copy its **Cookie** request header into
@@ -293,10 +307,11 @@ are reused, so no duplicate configuration is needed. Credentials stay in the
 backend and are never sent to the plugin UI. The account identity is checked
 before combining dashboard data with CodexBar's quota.
 
-The plugin reads the local Cursor session without modifying its database or
-refreshing tokens in place. Keep Cursor signed in; renew a manually supplied
-cookie when it expires. A setup/authentication problem appears beneath the
-available Cursor quota.
+The plugin reads local Cursor sessions without modifying their database,
+credential file or Keychain item, and it never reads the Agent CLI refresh
+token. Keep Cursor Desktop or Agent CLI signed in; run `agent login` again or
+renew a manually supplied cookie when it expires. A setup/authentication
+problem appears beneath the available Cursor quota.
 
 Cursor account types expose different fields. Enterprise request allowances
 remain the Total Usage metric, with Auto/API percentages added separately when

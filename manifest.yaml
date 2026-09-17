@@ -97,9 +97,17 @@ config_schema:
       secret: true
       title: "Cursor · Session cookie"
       description: >-
-        Usually empty: uses the Cursor app or CodexBar's manual cookie.
+        Usually empty: uses Cursor Desktop, Cursor Agent CLI, or CodexBar's manual cookie.
         For a remote host, paste your cursor.com Cookie request header.
         Save before reloading teams. Stored as a secret.
+    cursor_agent_keychain:
+      type: string
+      enum: ["off", "on"]
+      default: "off"
+      title: "Cursor · Agent CLI Keychain"
+      description: >-
+        macOS only. Allow the plugin to read the access token saved by agent login.
+        Keychain may ask you once to allow access. Linux and Windows auth files are automatic.
 
     # ── codexbar (data source) ────────────────────────────────────────────
     codexbar_command:
