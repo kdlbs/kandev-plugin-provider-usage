@@ -518,8 +518,8 @@ func (p *plugin) configuredList(ctx context.Context, key string) []string {
 
 // collectProviders probes codexbar, then queries each provider and partitions
 // the result into usable utilization vs unavailable providers. When codexbar
-// itself can't run, it degrades to a status-only report so the page can render
-// setup guidance.
+// itself can't run, it still tries providers with an independent integration
+// before returning the degraded report and setup guidance.
 func (p *plugin) collectProviders(ctx context.Context) *AllProvidersReport {
 	cfg := p.config(ctx)
 	warn, high := p.configuredThresholds(ctx)
@@ -558,8 +558,9 @@ func (p *plugin) collectProviders(ctx context.Context) *AllProvidersReport {
 	cancelProbe()
 	report.Codexbar = status
 	if !status.Installed {
-		log.Printf("codexbar unavailable at %s stage (status-only report): %s — %s",
+		log.Printf("codexbar unavailable at %s stage (degraded report): %s — %s",
 			status.Stage, status.Error, status.Hint)
+		p.enrichCursor(ctx, report)
 		return report
 	}
 
