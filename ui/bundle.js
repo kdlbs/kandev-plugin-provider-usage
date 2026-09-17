@@ -1615,7 +1615,8 @@ function makeCursorTeamSettings(host) {
 
 var SETTINGS_SECRET_MASK = "********";
 var SETTINGS_FIELDS = {
-  cursor_cookie_header: { label: "Session cookie", secret: true, hint: "Optional. Uses your Cursor app session automatically. For a remote host, save a cursor.com cookie here, then reload teams." },
+  cursor_cookie_header: { label: "Session cookie", secret: true, hint: "Optional. Uses Cursor Desktop or Agent CLI automatically. For a remote host, save a cursor.com cookie here, then reload teams." },
+  cursor_agent_keychain: { label: "Agent CLI Keychain", default: "off", options: [["off", "Off"], ["on", "Use on macOS"]], hint: "macOS only. Allows read-only access to the login saved by agent login; Keychain may ask once. Linux and Windows use the CLI auth file automatically." },
   augment_api_token: { label: "API token", secret: true, hint: "Analytics token from app.augmentcode.com/settings/personal-api-tokens." },
   augment_email: { label: "Account email", type: "email", hint: "Your Augment organization email." },
   augment_monthly_budget: { label: "Monthly budget", type: "number", min: 0, hint: "Leave empty to use the budget reported by Augment." },
@@ -1628,7 +1629,7 @@ var SETTINGS_FIELDS = {
   codexbar_command: { label: "CLI path", hint: "Leave empty to find or download CodexBar automatically." },
 };
 var PROVIDER_SETTING_FIELDS = {
-  cursor: ["cursor_cookie_header"],
+  cursor: ["cursor_cookie_header", "cursor_agent_keychain"],
   augment: ["augment_api_token", "augment_email", "augment_monthly_budget", "augment_resource"],
 };
 
@@ -1802,7 +1803,7 @@ function settingsConnection(provider, usage, failure, enabled, pending, config) 
       label: signIn ? "Sign-in needed" : "Unavailable", tone: "warning",
       summary: signIn ? "Check your " + name + " sign-in" : "Usage could not be read",
       hint: id === "augment" ? "Check the Analytics token and account email below, then refresh usage." :
-        id === "cursor" ? "Check your Cursor app session or the session cookie below, then reload teams and refresh usage." :
+        id === "cursor" ? "Check Cursor Desktop or run agent status on the machine running Kandev. On macOS, enable Agent CLI Keychain below. Then reload teams and refresh usage." :
         "Check your " + name + " sign-in on the machine running Kandev, then refresh usage. CodexBar diagnostics and updates are in Shared settings → Advanced.",
     };
   }

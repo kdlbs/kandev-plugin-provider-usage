@@ -68,6 +68,9 @@ func TestProviderDiscoveryRequiresLocalEvidence(t *testing.T) {
 		{"claude", "cli"}, {"copilot", "cli"}, {"cursor", "app"}, {"gemini", "configuration"},
 	}, scanner.scan(nil))
 	require.Empty(t, testScanner(nil, nil, nil).scan(nil), "absent providers must not have settings sections")
+	require.Equal(t, []detectedProvider{{"cursor", "configuration"}}, testScanner(nil, map[string]bool{
+		filepath.Join("/fixture/home", ".cursor", "cli-config.json"): true,
+	}, nil).scan(nil), "an Agent CLI login marker keeps its Cursor controls available")
 	require.Equal(t, []detectedProvider{{"augment", "configuration"}, {"cursor", "configuration"}}, testScanner(nil, nil, nil).scan(map[string]any{
 		configKeyAugmentToken: "secret", cursorCookieSetting: "secret",
 	}))
@@ -75,9 +78,9 @@ func TestProviderDiscoveryRequiresLocalEvidence(t *testing.T) {
 
 func TestProviderDiscoveryHonorsCustomCredentialLocations(t *testing.T) {
 	scanner := testScanner(nil, map[string]bool{
-		filepath.Join("/custom/codex", "auth.json"):                                        true,
-		filepath.Join("/custom/config", "github-copilot", "apps.json"):                     true,
-		filepath.Join("/custom/roaming", "Cursor", "User", "globalStorage", "state.vscdb"): true,
+		filepath.Join("/custom/codex", "auth.json"):                    true,
+		filepath.Join("/custom/config", "github-copilot", "apps.json"): true,
+		filepath.Join("/custom/config", "cursor", "auth.json"):         true,
 	}, map[string]string{"CODEX_HOME": "/custom/codex", "XDG_CONFIG_HOME": "/custom/config", "APPDATA": "/custom/roaming"})
 	require.Equal(t, []detectedProvider{{"codex", "configuration"}, {"copilot", "configuration"}, {"cursor", "configuration"}}, scanner.scan(nil))
 }

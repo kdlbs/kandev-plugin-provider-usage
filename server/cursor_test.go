@@ -182,6 +182,31 @@ func TestCursorFetchEnrichesOnlySameAccount(t *testing.T) {
 	require.ErrorContains(t, err, "unverified account")
 }
 
+func TestCursorFetchFallsBackToAgentCLIAuth(t *testing.T) {
+	var identityCalls atomic.Int32
+	c := cursorTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/auth/me" {
+			identityCalls.Add(1)
+			if strings.Contains(r.Header.Get("Cookie"), "stale_user") {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+		}
+		cursorFixtureHandler(nil)(w, r)
+	})
+	stale, err := cursorBearerAuth(cursorAuthFixtureFor("stale_user"))
+	require.NoError(t, err)
+	agent, err := cursorBearerAuth(cursorAuthFixtureFor("user_test"))
+	require.NoError(t, err)
+	stale.alternates = []cursorAuth{agent}
+	c.auth = func(context.Context, map[string]any) (cursorAuth, error) { return stale, nil }
+
+	out, err := c.fetch(context.Background(), nil, cursorBase(t), cursorTestNow)
+	require.NoError(t, err)
+	require.Len(t, out.Windows, 3)
+	require.Equal(t, int32(2), identityCalls.Load())
+}
+
 func TestCursorOptionalFailuresKeepQuotaAndDoNotLeakResponseBodies(t *testing.T) {
 	c := cursorTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/auth/me" {

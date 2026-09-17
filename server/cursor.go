@@ -92,6 +92,20 @@ func (c *cursorClient) fetch(ctx context.Context, cfg map[string]any, base *Prov
 	if err != nil {
 		return nil, err
 	}
+	candidates := append([]cursorAuth{auth}, auth.alternates...)
+	var lastErr error
+	for _, candidate := range candidates {
+		candidate.alternates = nil
+		usage, err := c.fetchWithAuth(ctx, candidate, teamID, base, now)
+		if err == nil {
+			return usage, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
+func (c *cursorClient) fetchWithAuth(ctx context.Context, auth cursorAuth, teamID int64, base *ProviderUsage, now time.Time) (*ProviderUsage, error) {
 	raw, err := c.request(ctx, auth, "/api/auth/me", false, nil)
 	if err != nil {
 		return nil, err
