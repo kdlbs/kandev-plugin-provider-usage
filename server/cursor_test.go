@@ -293,6 +293,22 @@ func TestCursorDirectUsageSurvivesCodexbarInstallFailure(t *testing.T) {
 	require.Len(t, report.Providers[0].Windows, 3)
 }
 
+func TestCursorDirectFailureSurvivesCodexbarInstallFailure(t *testing.T) {
+	p := newTestPlugin(t, codexbarConfig(map[string]any{"codexbar_providers": "cursor"}), nil,
+		func(context.Context, string, ...string) ([]byte, error) {
+			return nil, errors.New("exec: codexbar: not found")
+		})
+	p.cursor = &cursorClient{auth: func(context.Context, map[string]any) (cursorAuth, error) {
+		return cursorAuth{}, errors.New(cursorDetailHint)
+	}}
+
+	report := p.pollOnce(context.Background(), 0)
+
+	require.False(t, report.Codexbar.Installed)
+	require.Empty(t, report.Providers)
+	require.Equal(t, []ProviderError{{Provider: "cursor", Message: cursorDetailHint}}, report.Unavailable)
+}
+
 func TestCursorAuthFailurePreservesBaselineAndOtherProviders(t *testing.T) {
 	p := newTestPlugin(t, codexbarConfig(map[string]any{"codexbar_providers": "cursor,claude"}), nil,
 		providerRunner(nil, map[string][]byte{"cursor": []byte(cursorEnterpriseCLI), "claude": []byte(sampleClaudeJSON)}))
