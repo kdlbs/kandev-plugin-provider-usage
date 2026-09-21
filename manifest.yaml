@@ -24,6 +24,81 @@ capabilities:
   api_read: ["sessions"]
   state: true # Remember the selected Cursor team across restarts and upgrades.
 
+agent_tools:
+  - name: get_provider_usage
+    description: "Returns the cached, instance-wide provider usage snapshot; never refreshes provider telemetry."
+    surfaces: [kanban-task, office-task]
+    input_schema:
+      type: object
+      properties: {}
+      additionalProperties: false
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [schema_version, evaluated_at, snapshot_generated_at, poll_interval_seconds, stale_after_seconds, partial, scope, providers]
+      properties:
+        schema_version: {type: string, enum: ["1"]}
+        evaluated_at: {type: string, format: date-time}
+        snapshot_generated_at: {type: [string, "null"], format: date-time}
+        poll_interval_seconds: {type: integer, minimum: 60}
+        stale_after_seconds: {type: integer, minimum: 120}
+        partial: {type: boolean}
+        scope:
+          type: object
+          additionalProperties: false
+          required: [usage_scope, user_scoped, invocation_workspace_id]
+          properties:
+            usage_scope: {type: string, enum: [instance]}
+            user_scoped: {type: boolean, enum: [false]}
+            invocation_workspace_id: {type: string}
+        providers:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [provider_id, provider_name, account, support_state, availability_state, fetched_at, age_seconds, stale, windows]
+            properties:
+              provider_id: {type: string}
+              provider_name: {type: string}
+              account: {type: [object, "null"]}
+              support_state: {type: string, enum: [supported, unsupported, unknown]}
+              availability_state: {type: string, enum: [available, quota_exhausted, provider_unavailable, telemetry_stale, not_configured, unsupported, unknown]}
+              fetched_at: {type: [string, "null"], format: date-time}
+              age_seconds: {type: integer, minimum: 0}
+              stale: {type: boolean}
+              windows:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [window_id, window_name, window_seconds, scoped, utilization_percentage, remaining_percentage, reset_at, availability_state]
+                  properties:
+                    window_id: {type: string}
+                    window_name: {type: string}
+                    window_seconds: {type: [integer, "null"], minimum: 0}
+                    scoped: {type: boolean}
+                    utilization_percentage: {type: number, minimum: 0, maximum: 100}
+                    remaining_percentage: {type: number, minimum: 0, maximum: 100}
+                    reset_at: {type: [string, "null"], format: date-time}
+                    availability_state: {type: string, enum: [available, quota_exhausted]}
+              reason:
+                type: object
+                additionalProperties: false
+                required: [code, retryable, user_action_required]
+                properties:
+                  code: {type: string, enum: [quota_exhausted, not_configured, unsupported, provider_unavailable, unknown]}
+                  retryable: {type: boolean}
+                  user_action_required: {type: boolean}
+                  reset_at: {type: string, format: date-time}
+              warnings:
+                type: array
+                items: {type: string}
+    annotations:
+      read_only_hint: true
+      destructive_hint: false
+      idempotent_hint: true
+      open_world_hint: true
+
 webhooks:
   - key: "discovery"
     description: "Scan local provider connections without waiting for remote usage checks."

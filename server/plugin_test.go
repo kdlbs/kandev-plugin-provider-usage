@@ -295,6 +295,34 @@ func TestHandleWebhook_ProvidersAllSweep(t *testing.T) {
 	require.Len(t, report.Unavailable, 1)
 }
 
+func TestQueryProvidersClassifiesHardCommandFailures(t *testing.T) {
+	const notInstalled = "Provider not installed: Codex auth.json not found"
+	for _, tc := range []struct {
+		name      string
+		providers []string
+		provider  string
+		message   string
+		want      string
+	}{
+		{name: "all sweep auth failure", providers: nil, provider: providersAll, message: notInstalled, want: "not_configured"},
+		{name: "fast provider auth failure", providers: []string{"codex"}, provider: "codex", message: notInstalled, want: "not_configured"},
+		{name: "unknown failure remains unavailable", providers: []string{"codex"}, provider: "codex", message: "exit status 1", want: "provider_unavailable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := newPlugin()
+			p.run = func(context.Context, string, ...string) ([]byte, error) {
+				return nil, errors.New(tc.message)
+			}
+			report := &AllProvidersReport{}
+			p.queryProviders(context.Background(), resolvedCommand{Argv: []string{"codexbar"}}, tc.providers, report)
+			require.Len(t, report.Unavailable, 1)
+			require.Equal(t, tc.provider, report.Unavailable[0].Provider)
+			require.Equal(t, tc.want, report.Unavailable[0].Kind)
+			require.Contains(t, report.Unavailable[0].Message, tc.message)
+		})
+	}
+}
+
 func TestHandleWebhook_ProvidersDegradesWhenMissing(t *testing.T) {
 	run := func(context.Context, string, ...string) ([]byte, error) {
 		return nil, errors.New("exec: codexbar: not found")

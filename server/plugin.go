@@ -191,6 +191,20 @@ func (p *plugin) pollOnce(ctx context.Context, maxAge time.Duration) *AllProvide
 		p.mu.Unlock()
 		report := p.collectProviders(runCtx)
 		p.mu.Lock()
+		// A failed provider probe must not evict a still-useful value from the
+		// previous poll. Retain it alongside the failure so agent-tool consumers
+		// receive a partial snapshot without triggering new provider I/O.
+		if p.snapshot != nil {
+			prior := make(map[string]ProviderUsage, len(p.snapshot.Providers))
+			for _, usage := range p.snapshot.Providers {
+				prior[usage.Provider] = usage
+			}
+			for _, unavailable := range report.Unavailable {
+				if usage, ok := prior[unavailable.Provider]; ok {
+					report.Providers = append(report.Providers, usage)
+				}
+			}
+		}
 		if revision == p.cursorSelectionRevision {
 			p.snapshot, p.snapshotAt = report, p.now()
 			p.mu.Unlock()
@@ -400,7 +414,10 @@ func (p *plugin) statusJSON(ctx context.Context, refresh bool) []byte {
 // unavailable rather than silently dropping it.
 type ProviderError struct {
 	Provider string `json:"provider"`
-	Message  string `json:"message"`
+	// Kind is a stable adapter classification. The agent tool deliberately never
+	// exposes Message, which may contain upstream diagnostics or credentials.
+	Kind    string `json:"kind,omitempty"`
+	Message string `json:"message"`
 }
 
 // AllProvidersReport is the providers-webhook payload rendered by the Settings
@@ -569,7 +586,7 @@ func (p *plugin) collectProviders(ctx context.Context) *AllProvidersReport {
 	entries := p.queryProviders(ctx, cmd, p.providerList(ctx), report)
 	for _, e := range entries {
 		if e.Error != nil {
-			report.Unavailable = append(report.Unavailable, ProviderError{Provider: e.Provider, Message: e.Error.Message})
+			report.Unavailable = append(report.Unavailable, ProviderError{Provider: e.Provider, Kind: classifyProviderError(e.Error.Kind, e.Error.Message), Message: e.Error.Message})
 			continue
 		}
 		if u := e.toProviderUsage(p.now()); u != nil {
@@ -667,7 +684,35 @@ func cursorUnavailable(report *AllProvidersReport, err error) {
 			return
 		}
 	}
-	report.Unavailable = append(report.Unavailable, ProviderError{Provider: "cursor", Message: err.Error()})
+	report.Unavailable = append(report.Unavailable, ProviderError{Provider: "cursor", Kind: classifyProviderError("", err.Error()), Message: err.Error()})
+}
+
+// classifyProviderError accepts only a small set of stable adapter kinds and
+// known upstream messages. Everything else remains unclassified so the agent
+// tool never turns arbitrary provider text into a confident routing state.
+func classifyProviderError(kind, message string) string {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "not_configured", "not-configured", "not_installed", "not-installed", "not_signed_in", "not-signed-in", "unauthenticated", "authentication":
+		return "not_configured"
+	case "provider_unavailable", "provider-unavailable", "unavailable":
+		return "provider_unavailable"
+	}
+	message = strings.ToLower(strings.TrimSpace(message))
+	for _, marker := range []string{
+		"no cursor session found", "not signed in", "not logged in",
+		"provider not installed", "auth.json not found", "missing credentials",
+		"session cookie is missing",
+	} {
+		if strings.Contains(message, marker) {
+			return "not_configured"
+		}
+	}
+	for _, marker := range []string{"provider unavailable", "service unavailable", "temporarily unavailable", "network unavailable"} {
+		if strings.Contains(message, marker) {
+			return "provider_unavailable"
+		}
+	}
+	return ""
 }
 
 // appendAugment adds Augment usage to the report when an Augment Analytics token
@@ -699,7 +744,7 @@ func (p *plugin) appendAugment(ctx context.Context, report *AllProvidersReport) 
 	usage, err := client.fetchUsage(cctx)
 	if err != nil {
 		log.Printf("augment usage fetch failed: %v", err)
-		report.Unavailable = append(report.Unavailable, ProviderError{Provider: "augment", Message: err.Error()})
+		report.Unavailable = append(report.Unavailable, ProviderError{Provider: "augment", Kind: "provider_unavailable", Message: err.Error()})
 		return
 	}
 	report.Providers = append(report.Providers, *usage)
@@ -770,7 +815,7 @@ func (p *plugin) queryProviders(ctx context.Context, cmd resolvedCommand, provid
 	if providers == nil {
 		entries, err := runUsage(ctx, cmd, p.run, providersAll)
 		if err != nil {
-			report.Unavailable = append(report.Unavailable, ProviderError{Provider: providersAll, Message: err.Error()})
+			report.Unavailable = append(report.Unavailable, ProviderError{Provider: providersAll, Kind: hardProviderFailureKind(err), Message: err.Error()})
 		}
 		return entries
 	}
@@ -791,6 +836,7 @@ func (p *plugin) queryProviders(ctx context.Context, cmd resolvedCommand, provid
 			if err != nil {
 				results[i] = result{perr: &ProviderError{
 					Provider: prov,
+					Kind:     hardProviderFailureKind(err),
 					Message:  providerErrMessage(err, cctx, ctx),
 				}}
 				return
@@ -809,6 +855,16 @@ func (p *plugin) queryProviders(ctx context.Context, cmd resolvedCommand, provid
 		entries = append(entries, r.entries...)
 	}
 	return entries
+}
+
+// hardProviderFailureKind preserves the established unavailable fallback for a
+// command failure, while recognizing the stable authentication/setup failures
+// that codexbar can only emit on stderr or as non-JSON output.
+func hardProviderFailureKind(err error) string {
+	if kind := classifyProviderError("", err.Error()); kind != "" {
+		return kind
+	}
+	return "provider_unavailable"
 }
 
 // providerErrMessage names what actually went wrong for one provider. A killed
