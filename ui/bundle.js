@@ -23,6 +23,10 @@
 var AUTO_REFRESH_MS = 60 * 1000;
 var DISCOVERY_RETRY_MS = 2 * 1000;
 var TOPBAR_STYLE_ID = "kandev-provider-usage-topbar-style";
+var TRANSLATIONS = {
+  en: { providerUsage: "Provider usage" },
+  "pt-pt": { providerUsage: "Utilização do fornecedor" },
+};
 var TOPBAR_CSS =
   "#provider-usage-topbar[data-provider-usage-legacy=true]{height:28px;min-height:28px}" +
   "#provider-usage-topbar[data-provider-usage-legacy=true][data-provider-usage-mode=icon]{width:28px}" +
@@ -2176,6 +2180,9 @@ function makeSettingsStatus(host) {
 // ==========================================================================
 window.registerKandevPlugin("kandev-provider-usage", {
   initialize: function (registry, host) {
+    if (registry && typeof registry.registerTranslations === "function") {
+      registry.registerTranslations(TRANSLATIONS);
+    }
     injectTopbarStyles();
     registry.registerComponent("main-top-bar", makeTopBarStatus(host));
     registry.registerComponent("chat-top-bar", makeTopBarStatus(host));

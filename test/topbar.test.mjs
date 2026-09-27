@@ -33,6 +33,7 @@ function mount(slot = "main-top-bar", slotProps, saved = "", options = {}) {
   const ui = { Button: "button", Card: "article" };
   if (options.actionsSupported !== false) ui.Action = HostAction;
   const translationCalls = [];
+  const translationCatalogs = {};
   const host = {
     React,
     jsx: (type, props, ...children) => ({
@@ -43,10 +44,18 @@ function mount(slot = "main-top-bar", slotProps, saved = "", options = {}) {
     ui,
     api: { fetch(url, init) { return new Promise((resolve, reject) => requests.push({ url, init, resolve: (data, ok = true) => resolve({ ok, json: () => Promise.resolve(data) }), reject })); } },
   };
-  if (options.i18nLabel) {
+  if (options.i18nLocale) {
     host.i18n = {
       useTranslation() {
-        return { t(key, args) { translationCalls.push({ key, args }); return options.i18nLabel; } };
+        return {
+          t(key, args) {
+            translationCalls.push({ key, defaultValue: args?.defaultValue });
+            return translationCatalogs[options.i18nLocale]?.[key]
+              || translationCatalogs.en?.[key]
+              || args?.defaultValue
+              || key;
+          },
+        };
       },
     };
   }
@@ -60,7 +69,13 @@ function mount(slot = "main-top-bar", slotProps, saved = "", options = {}) {
     setInterval: fn => { intervals.set(++timerID, fn); return timerID; }, clearInterval: id => intervals.delete(id),
     setTimeout: fn => { timeouts.set(++timerID, fn); return timerID; }, clearTimeout: id => timeouts.delete(id),
   });
-  definition.initialize({ registerComponent: (name, component) => registrations.set(name, component) }, host);
+  const registry = {
+    registerComponent: (name, component) => registrations.set(name, component),
+  };
+  if (options.translationRegistrationSupported !== false) {
+    registry.registerTranslations = catalogs => Object.assign(translationCatalogs, catalogs);
+  }
+  definition.initialize(registry, host);
   assert.ok(registrations.has(slot), `${slot} is registered`);
   function render(nextProps = slotProps) {
     slotProps = nextProps;
@@ -73,6 +88,7 @@ function mount(slot = "main-top-bar", slotProps, saved = "", options = {}) {
   return { render, requests, intervals, timeouts, registrations,
     Action: ui.Action,
     translationCalls,
+    translationCatalogs,
     get saved() { return saved; }, get writes() { return writes; },
     unmount() { hooks.forEach(hook => hook?.cleanup?.()); },
   };
@@ -488,22 +504,41 @@ test("topbar Action stays an icon while loading, with no providers, and after an
   failed.unmount();
 });
 
-test("topbar Action label uses plugin-local i18n and falls back when i18n is absent", () => {
+test("provider usage English and pt-PT labels are registered and looked up by i18n", () => {
   const localized = mount("main-top-bar", { presentation: "desktop" }, "", {
-    i18nLabel: "Uso do fornecedor",
+    i18nLocale: "pt-pt",
   });
+  assert.equal(localized.translationCatalogs.en.providerUsage, "Provider usage");
+  assert.equal(localized.translationCatalogs["pt-pt"].providerUsage, "Utilização do fornecedor");
   const action = trigger(localized.render());
-  assert.equal(action.props.label, "Uso do fornecedor");
+  assert.equal(action.props.label, "Utilização do fornecedor");
   assert.equal(action.props.tooltip, "");
   assert.equal(localized.translationCalls.length, 1);
   assert.equal(localized.translationCalls[0].key, "providerUsage");
-  assert.equal(localized.translationCalls[0].args.defaultValue, "Provider usage");
+  assert.equal(localized.translationCalls[0].defaultValue, "Provider usage");
   localized.unmount();
+
+  const english = mount("main-top-bar", { presentation: "desktop" }, "", { i18nLocale: "en" });
+  assert.equal(trigger(english.render()).props.label, "Provider usage");
+  english.unmount();
 
   const withoutI18n = mount("main-top-bar", { presentation: "desktop" });
   assert.equal(trigger(withoutI18n.render()).props.label, "Provider usage");
   assert.equal(withoutI18n.translationCalls.length, 0);
   withoutI18n.unmount();
+});
+
+test("older registries without translation support keep the English label fallback", () => {
+  const app = mount("main-top-bar", { presentation: "desktop" }, "", {
+    actionsSupported: false,
+    i18nLocale: "pt-pt",
+    translationRegistrationSupported: false,
+  });
+  const triggerNode = trigger(app.render());
+  assert.equal(triggerNode.props["aria-label"], "Provider usage");
+  assert.equal(app.translationCatalogs.en, undefined);
+  assert.equal(app.translationCalls[0].key, "providerUsage");
+  app.unmount();
 });
 
 test("topbar Action sends long metric text to the host without adding fixed geometry", async () => {
@@ -524,7 +559,7 @@ test("topbar Action sends long metric text to the host without adding fixed geom
 test("an older host selects the original Button once and keeps the rich provider pill", async () => {
   const app = mount("main-top-bar", { presentation: "desktop" }, "codex", {
     actionsSupported: false,
-    i18nLabel: "Uso do fornecedor",
+    i18nLocale: "pt-pt",
   });
   app.render();
   app.requests[0].resolve({ ...snapshot, current_provider: "codex" }); await flush();
@@ -532,7 +567,7 @@ test("an older host selects the original Button once and keeps the rich provider
   const fallback = trigger(tree);
   assert.equal(fallback.type, "button");
   assert.equal(fallback.props["data-provider-usage-legacy"], "true");
-  assert.equal(fallback.props["aria-label"], "Uso do fornecedor");
+  assert.equal(fallback.props["aria-label"], "Utilização do fornecedor");
   assert.match(fallback.props.className, /h-6 gap-1\.5 px-2/);
   assert.match(text(fallback), /61%/);
   assert.equal(nodes(tree, n => n.props.id === "provider-usage-topbar").length, 1);
