@@ -169,7 +169,7 @@ jobs:
           make vet
           make test
           make verify-package
-          PACKAGE_FILE="$(make -s package-file)"
+          PACKAGE_FILE="$(make --no-print-directory -s package-file)"
           sh scripts/verify-release-version.sh "$TAG" "$PACKAGE_FILE"
 
       - name: Commit and tag validated release metadata
@@ -250,7 +250,7 @@ jobs:
           make vet
           make test
           make verify-package
-          PACKAGE_FILE="$(make -s package-file)"
+          PACKAGE_FILE="$(make --no-print-directory -s package-file)"
           sh scripts/verify-release-version.sh "$TAG" "$PACKAGE_FILE"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "package=$PACKAGE_FILE" >> "$GITHUB_OUTPUT"

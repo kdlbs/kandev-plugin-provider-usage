@@ -25,7 +25,7 @@ make_version=$(sed -nE 's/^VERSION := ([0-9]+\.[0-9]+\.[0-9]+)$/\1/p' Makefile)
 
 if [ "$#" -eq 2 ]; then
 	package_file=$2
-	expected_package=$(make -s package-file)
+	expected_package=$(make --no-print-directory -s package-file)
 	[ -f "$package_file" ] || fail "package file not found: $package_file"
 	[ "$(basename "$package_file")" = "$expected_package" ] || fail "package filename $(basename "$package_file") differs from $expected_package"
 	tmp_dir=$(mktemp -d)

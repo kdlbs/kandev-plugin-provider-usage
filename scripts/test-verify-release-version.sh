@@ -44,14 +44,14 @@ expect_failure 'a Makefile version that differs from manifest.yaml' "$test_dir/w
 make_fixture wrong-package
 mkdir -p "$test_dir/wrong-package/archive"
 sed "s/^version: \"$base_version\"$/version: \"$wrong_version\"/" "$test_dir/wrong-package/manifest.yaml" > "$test_dir/wrong-package/archive/manifest.yaml"
-package_file=$(cd "$test_dir/wrong-package" && make -s package-file)
+package_file=$(cd "$test_dir/wrong-package" && make --no-print-directory -s package-file)
 tar -czf "$test_dir/wrong-package/$package_file" -C "$test_dir/wrong-package/archive" manifest.yaml
 expect_failure 'an archive manifest version that differs from its tag' "$test_dir/wrong-package" "v$base_version" "$package_file"
 
 make_fixture matching-package
 mkdir -p "$test_dir/matching-package/archive"
 cp "$test_dir/matching-package/manifest.yaml" "$test_dir/matching-package/archive/manifest.yaml"
-package_file=$(cd "$test_dir/matching-package" && make -s package-file)
+package_file=$(cd "$test_dir/matching-package" && make --no-print-directory -s package-file)
 tar -czf "$test_dir/matching-package/$package_file" -C "$test_dir/matching-package/archive" manifest.yaml
 (cd "$test_dir/matching-package" && sh "$verify_script" "v$base_version" "$package_file")
 

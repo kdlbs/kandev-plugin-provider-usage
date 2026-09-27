@@ -841,14 +841,22 @@ function makeTopBarStatus(host) {
     var actionText = selected
       ? ((selected.windows || []).length ? fmtPct(peakPct(selected)) : "—")
       : undefined;
+    var actionLabel = "Provider usage";
+    if (host.i18n && typeof host.i18n.useTranslation === "function") {
+      var translation = host.i18n.useTranslation();
+      if (translation && typeof translation.t === "function") {
+        actionLabel = translation.t("providerUsage", { defaultValue: actionLabel });
+      }
+    }
     var trigger;
 
     if (typeof ui.Action === "function") {
       trigger = h(ui.Action, {
         id: "provider-usage-topbar",
-        label: "Provider usage",
+        label: actionLabel,
         icon: actionIcon,
         text: actionText,
+        tooltip: "",
         "aria-expanded": open,
         onFocus: mobileMenu ? undefined : openNow,
         onClick: function () { if (open) { setOpen(false); } else { openNow(); } },
@@ -864,7 +872,7 @@ function makeTopBarStatus(host) {
           variant: "outline",
           size: "sm",
           className: (pill ? "h-6 gap-1.5 px-2 " : "h-6 w-6 px-0 ") + "rounded-md text-xs font-medium text-muted-foreground hover:text-foreground",
-          "aria-label": "Provider usage",
+          "aria-label": actionLabel,
           "aria-expanded": open,
           onFocus: mobileMenu ? undefined : openNow,
           onClick: function () { if (open) { setOpen(false); } else { openNow(); } },

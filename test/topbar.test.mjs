@@ -32,6 +32,7 @@ function mount(slot = "main-top-bar", slotProps, saved = "", options = {}) {
   const requests = [];
   const ui = { Button: "button", Card: "article" };
   if (options.actionsSupported !== false) ui.Action = HostAction;
+  const translationCalls = [];
   const host = {
     React,
     jsx: (type, props, ...children) => ({
@@ -42,6 +43,13 @@ function mount(slot = "main-top-bar", slotProps, saved = "", options = {}) {
     ui,
     api: { fetch(url, init) { return new Promise((resolve, reject) => requests.push({ url, init, resolve: (data, ok = true) => resolve({ ok, json: () => Promise.resolve(data) }), reject })); } },
   };
+  if (options.i18nLabel) {
+    host.i18n = {
+      useTranslation() {
+        return { t(key, args) { translationCalls.push({ key, args }); return options.i18nLabel; } };
+      },
+    };
+  }
   const source = readFileSync(new URL("../ui/bundle.js", import.meta.url), "utf8");
   vm.runInNewContext(source + (slot === "cursor-team-settings" ? "\nwindow.registerTestComponent(makeCursorTeamSettings);" : ""), {
     fetch: host.api.fetch,
@@ -64,6 +72,7 @@ function mount(slot = "main-top-bar", slotProps, saved = "", options = {}) {
   }
   return { render, requests, intervals, timeouts, registrations,
     Action: ui.Action,
+    translationCalls,
     get saved() { return saved; }, get writes() { return writes; },
     unmount() { hooks.forEach(hook => hook?.cleanup?.()); },
   };
@@ -83,7 +92,7 @@ const snapshot = { current_provider: "", pill_providers: [], providers: [
   { provider: "codex", windows: [{ utilization_pct: 61 }] },
 ] };
 const flush = () => new Promise(resolve => setImmediate(resolve));
-const trigger = tree => nodes(tree, n => n.props.label === "Provider usage" || n.props["aria-label"] === "Provider usage")[0];
+const trigger = tree => nodes(tree, n => n.props.id === "provider-usage-topbar")[0];
 
 async function loadSettings(app, data, config = {}) {
   app.render();
@@ -424,6 +433,7 @@ test("both topbar slots use one host Action and retain the disclosure trigger", 
     let action = trigger(tree);
     assert.equal(action.type, app.Action);
     assert.equal(action.props.label, "Provider usage");
+    assert.equal(action.props.tooltip, "", "the rich disclosure replaces the host's default label tooltip");
     assert.equal(action.props.text, undefined, "loading keeps the action icon-only");
     assert.equal(action.props["aria-expanded"], false);
     assert.equal(typeof action.props.onClick, "function");
@@ -478,6 +488,24 @@ test("topbar Action stays an icon while loading, with no providers, and after an
   failed.unmount();
 });
 
+test("topbar Action label uses plugin-local i18n and falls back when i18n is absent", () => {
+  const localized = mount("main-top-bar", { presentation: "desktop" }, "", {
+    i18nLabel: "Uso do fornecedor",
+  });
+  const action = trigger(localized.render());
+  assert.equal(action.props.label, "Uso do fornecedor");
+  assert.equal(action.props.tooltip, "");
+  assert.equal(localized.translationCalls.length, 1);
+  assert.equal(localized.translationCalls[0].key, "providerUsage");
+  assert.equal(localized.translationCalls[0].args.defaultValue, "Provider usage");
+  localized.unmount();
+
+  const withoutI18n = mount("main-top-bar", { presentation: "desktop" });
+  assert.equal(trigger(withoutI18n.render()).props.label, "Provider usage");
+  assert.equal(withoutI18n.translationCalls.length, 0);
+  withoutI18n.unmount();
+});
+
 test("topbar Action sends long metric text to the host without adding fixed geometry", async () => {
   const app = mount("main-top-bar", { presentation: "desktop" });
   app.render();
@@ -494,18 +522,26 @@ test("topbar Action sends long metric text to the host without adding fixed geom
 });
 
 test("an older host selects the original Button once and keeps the rich provider pill", async () => {
-  const app = mount("main-top-bar", { presentation: "desktop" }, "codex", { actionsSupported: false });
+  const app = mount("main-top-bar", { presentation: "desktop" }, "codex", {
+    actionsSupported: false,
+    i18nLabel: "Uso do fornecedor",
+  });
   app.render();
   app.requests[0].resolve({ ...snapshot, current_provider: "codex" }); await flush();
   const tree = app.render();
   const fallback = trigger(tree);
   assert.equal(fallback.type, "button");
   assert.equal(fallback.props["data-provider-usage-legacy"], "true");
+  assert.equal(fallback.props["aria-label"], "Uso do fornecedor");
   assert.match(fallback.props.className, /h-6 gap-1\.5 px-2/);
   assert.match(text(fallback), /61%/);
   assert.equal(nodes(tree, n => n.props.id === "provider-usage-topbar").length, 1);
   assert.equal(nodes(tree, n => n.props["data-provider-usage-legacy"] === "true").length, 1);
   app.unmount();
+
+  const withoutI18n = mount("main-top-bar", { presentation: "desktop" }, "", { actionsSupported: false });
+  assert.equal(trigger(withoutI18n.render()).props["aria-label"], "Provider usage");
+  withoutI18n.unmount();
 });
 
 test("unscoped fallback, empty, error and silent poll recovery", async () => {
