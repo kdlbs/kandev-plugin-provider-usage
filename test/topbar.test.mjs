@@ -5,10 +5,11 @@ import vm from "node:vm";
 
 // Exercise the registered component with deterministic hooks, requests and timers.
 // No provider CLI, browser storage, or real clock is used.
-function mount(slot = "main-top-bar", slotProps, saved = "") {
+function mount(slot = "main-top-bar", slotProps, saved = "", options = {}) {
   const hooks = [], pending = [], intervals = new Map(), timeouts = new Map();
   const registrations = new Map();
   let definition, cursor = 0, timerID = 0, writes = 0;
+  function HostAction() {}
   const React = {
     useState(initial) {
       const i = cursor++;
@@ -29,9 +30,16 @@ function mount(slot = "main-top-bar", slotProps, saved = "") {
     },
   };
   const requests = [];
+  const ui = { Button: "button", Card: "article" };
+  if (options.actionsSupported !== false) ui.Action = HostAction;
   const host = {
-    React, jsx: (type, props, ...children) => ({ type, props: props || {}, children }),
-    ui: { Button: "button", Card: "article" },
+    React,
+    jsx: (type, props, ...children) => ({
+      type,
+      props: props || {},
+      children: type === HostAction ? [props?.text] : children,
+    }),
+    ui,
     api: { fetch(url, init) { return new Promise((resolve, reject) => requests.push({ url, init, resolve: (data, ok = true) => resolve({ ok, json: () => Promise.resolve(data) }), reject })); } },
   };
   const source = readFileSync(new URL("../ui/bundle.js", import.meta.url), "utf8");
@@ -55,6 +63,7 @@ function mount(slot = "main-top-bar", slotProps, saved = "") {
     return tree;
   }
   return { render, requests, intervals, timeouts, registrations,
+    Action: ui.Action,
     get saved() { return saved; }, get writes() { return writes; },
     unmount() { hooks.forEach(hook => hook?.cleanup?.()); },
   };
@@ -74,7 +83,7 @@ const snapshot = { current_provider: "", pill_providers: [], providers: [
   { provider: "codex", windows: [{ utilization_pct: 61 }] },
 ] };
 const flush = () => new Promise(resolve => setImmediate(resolve));
-const trigger = tree => nodes(tree, n => n.props["aria-label"] === "Provider usage")[0];
+const trigger = tree => nodes(tree, n => n.props.label === "Provider usage" || n.props["aria-label"] === "Provider usage")[0];
 
 async function loadSettings(app, data, config = {}) {
   app.render();
@@ -404,6 +413,100 @@ for (const slotProps of [undefined, { workspaceId: "workspace", currentPage: "ka
     assert.equal(app.intervals.size, 0);
   });
 }
+
+test("both topbar slots use one host Action and retain the disclosure trigger", async () => {
+  for (const [slot, slotProps] of [
+    ["main-top-bar", { currentPage: "kanban", presentation: "desktop" }],
+    ["chat-top-bar", { taskId: "task/1", activeSessionId: "session/1", presentation: "desktop" }],
+  ]) {
+    const app = mount(slot, slotProps, "codex");
+    let tree = app.render();
+    let action = trigger(tree);
+    assert.equal(action.type, app.Action);
+    assert.equal(action.props.label, "Provider usage");
+    assert.equal(action.props.text, undefined, "loading keeps the action icon-only");
+    assert.equal(action.props["aria-expanded"], false);
+    assert.equal(typeof action.props.onClick, "function");
+    assert.equal(typeof action.props.onFocus, "function");
+    assert.equal(action.props.icon.props["aria-hidden"], "true", "the host supplies the accessible action name");
+    for (const prop of ["className", "style", "size", "variant", "asChild"]) {
+      assert.equal(Object.hasOwn(action.props, prop), false, `${prop} is host-owned`);
+    }
+    assert.equal(nodes(tree, n => n.props.id === "provider-usage-topbar").length, 1);
+
+    app.requests[0].resolve({ ...snapshot, current_provider: "codex" }); await flush();
+    tree = app.render();
+    action = trigger(tree);
+    assert.equal(action.props.text, "61%");
+    assert.equal(action.props.label, "Provider usage", "the accessible name stays stable as the value changes");
+
+    action.props.onFocus();
+    tree = app.render();
+    assert.equal(trigger(tree).props["aria-expanded"], true);
+    assert.match(text(tree), /61%/);
+    assert.equal(nodes(tree, n => n.props["data-provider-usage-panel"] === "true").length, 1);
+    trigger(tree).props.onClick();
+    assert.equal(trigger(app.render()).props["aria-expanded"], false);
+    app.unmount();
+  }
+});
+
+test("topbar Action stays an icon while loading, with no providers, and after an error", async () => {
+  const app = mount("main-top-bar", { presentation: "mobile" });
+  let tree = app.render();
+  let action = trigger(tree);
+  assert.equal(action.type, app.Action);
+  assert.equal(action.props.text, undefined);
+  assert.equal(action.props.onFocus, undefined, "phone activation remains tap-driven");
+  app.requests[0].resolve({ providers: [], current_provider: "", pill_providers: [] }); await flush();
+  tree = app.render();
+  action = trigger(tree);
+  assert.equal(action.props.text, undefined);
+  action.props.onClick();
+  tree = app.render();
+  assert.equal(trigger(tree).props["aria-expanded"], true);
+  assert.match(text(tree), /No provider usage yet/);
+  app.unmount();
+
+  const failed = mount("chat-top-bar", { taskId: "task/2", activeSessionId: "session/2" });
+  failed.render();
+  failed.requests[0].reject(new Error("offline")); await flush();
+  action = trigger(failed.render());
+  assert.equal(action.type, failed.Action);
+  assert.equal(action.props.text, undefined);
+  assert.equal(action.props.label, "Provider usage");
+  failed.unmount();
+});
+
+test("topbar Action sends long metric text to the host without adding fixed geometry", async () => {
+  const app = mount("main-top-bar", { presentation: "desktop" });
+  app.render();
+  app.requests[0].resolve({ current_provider: "codex", providers: [
+    { provider: "codex", windows: [{ utilization_pct: 123456.78 }] },
+  ] }); await flush();
+  const action = trigger(app.render());
+  assert.equal(action.type, app.Action);
+  assert.equal(action.props.text, "123457%");
+  assert.equal(action.props.label, "Provider usage");
+  assert.equal(Object.hasOwn(action.props, "style"), false);
+  assert.equal(Object.hasOwn(action.props, "className"), false);
+  app.unmount();
+});
+
+test("an older host selects the original Button once and keeps the rich provider pill", async () => {
+  const app = mount("main-top-bar", { presentation: "desktop" }, "codex", { actionsSupported: false });
+  app.render();
+  app.requests[0].resolve({ ...snapshot, current_provider: "codex" }); await flush();
+  const tree = app.render();
+  const fallback = trigger(tree);
+  assert.equal(fallback.type, "button");
+  assert.equal(fallback.props["data-provider-usage-legacy"], "true");
+  assert.match(fallback.props.className, /h-6 gap-1\.5 px-2/);
+  assert.match(text(fallback), /61%/);
+  assert.equal(nodes(tree, n => n.props.id === "provider-usage-topbar").length, 1);
+  assert.equal(nodes(tree, n => n.props["data-provider-usage-legacy"] === "true").length, 1);
+  app.unmount();
+});
 
 test("unscoped fallback, empty, error and silent poll recovery", async () => {
   const app = mount("main-top-bar", {}, "missing");

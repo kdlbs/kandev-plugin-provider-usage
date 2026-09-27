@@ -153,14 +153,17 @@ test("registers provider usage in the global status bar right slot only", () => 
   assert.ok(!slots.includes("app-status-bar-left"));
 });
 
-test("chat topbar control uses desktop and phone geometry", () => {
+test("only the legacy chat topbar button keeps plugin-owned dimensions", () => {
   const styles = topbarStyleText();
 
-  assert.match(styles, /#provider-usage-topbar[^}]*height:28px/);
+  assert.match(styles, /#provider-usage-topbar\[data-provider-usage-legacy=true\][^}]*height:28px/);
   assert.match(
     styles,
-    /@media \(max-width:639px\)\{#provider-usage-topbar[^}]*height:44px/,
+    /@media \(max-width:639px\)\{#provider-usage-topbar\[data-provider-usage-legacy=true\][^}]*height:44px/,
   );
+  assert.match(styles, /\.provider-usage-menu \[data-provider-usage-panel\] button\{min-height:44px!important/);
+  assert.doesNotMatch(styles, /\.provider-usage-menu button\{/);
+  assert.doesNotMatch(styles, /#provider-usage-topbar\{height:/, "the host Action path has no copied dimensions");
 });
 
 function element(type, props, ...children) {
@@ -664,6 +667,6 @@ test("repeated initialize/destroy removes shared styles without duplicating them
   }
 });
 
-test("mobile menu pill reserves room for icon and percentage despite host square-button sizing", () => {
-  assert.match(topbarStyleText(), /\.provider-usage-menu #provider-usage-topbar\[data-provider-usage-mode=pill\]\{min-width:72px!important\}/);
+test("mobile menu pill reserves room only on the legacy host Button", () => {
+  assert.match(topbarStyleText(), /\.provider-usage-menu #provider-usage-topbar\[data-provider-usage-legacy=true\]\[data-provider-usage-mode=pill\]\{min-width:72px!important\}/);
 });

@@ -62,6 +62,9 @@ a projected month-end total:
   (Home/Kanban, Tasks, and Threads) and the existing `chat-top-bar` plugin slot
   (kandev ≥ [#1827](https://github.com/kdlbs/kandev/pull/1827)) — a pill for
   your selected provider (icon + %), each real brand mark rendered monochrome.
+  Hosts that expose `host.ui.Action` render its icon and percentage in the
+  host-owned toolbar control; older hosts keep the existing `host.ui.Button`
+  pill. Both paths use the same selected provider and click behavior.
   Hover to open a panel that cycles through every provider; click to switch,
   and the selected tab is remembered locally.
   The shared bar has no task or active session: it reads the same account-wide
@@ -76,6 +79,10 @@ a projected month-end total:
   pill. It adapts to the host's 24 px desktop/tablet bar and its phone Status
   drawer. It is global provider/account usage only; session IDs only help
   resolve `current`.
+- The Action migration covers the single selected-provider top-bar trigger.
+  The optional status bar stays a read-only multi-provider strip with reset
+  details and a phone drawer. The trigger continues to open the existing
+  provider panel; its rich content is not rendered inside the Action.
 - Each provider's panel shows its rate-limit windows as thin bars (calm indigo
   normally, warming to amber/coral only when high — never a hard red), a
   reset countdown, plan/source badges, and codexbar's pace summary
@@ -348,16 +355,40 @@ It does not assume that the account summary or RPC accepts a team query paramete
 
 ## Develop
 
-Requires a sibling checkout of the kandev monorepo at `../kandev` (see the
-`replace` directive in `go.mod`).
+Use Go 1.26.0 and Node 24. The Node tests use built-in modules and need no npm
+dependencies. `.kandev-sdk-ref` pins the Kandev source used by the Go module
+replacement and the host Action contract. This source pin does not set the
+plugin's runtime minimum. The manifest remains API v1 and has no declared
+`min_kandev_version`; the UI selects the old Button when Action is absent.
+
+Create the sibling host checkout if needed, then set it to the pinned revision:
 
 ```sh
-make test           # Go + UI-bundle tests (codexbar/Augment calls are injected — no network needed)
-make vet
-go test -race ./server/...
-make package-host   # tarball for this machine only (fast iteration)
-make package        # tarball for all 5 supported platforms, including Apple Silicon
+if [ ! -d ../kandev/.git ]; then
+  git clone https://github.com/kdlbs/kandev.git ../kandev
+fi
+SDK_REF="$(cat .kandev-sdk-ref)"
+git -C ../kandev fetch origin "$SDK_REF"
+git -C ../kandev checkout --detach "$SDK_REF"
 ```
+
+Keep that checkout at the same revision while running the commands below.
+`plugin-pack` runs inside `../kandev/apps/backend` so it uses the SDK module's
+own dependency files.
+
+```sh
+make check-format
+go mod tidy
+git diff --exit-code -- go.mod go.sum
+make vet
+make test
+make build
+make verify-package-host
+make verify-package
+```
+
+For a disposable built-package check on a new Action host and the older Button
+fallback, follow [`test/host-smoke/README.md`](test/host-smoke/README.md).
 
 Install the tarball via **Settings → Plugins → Install plugin → Upload**.
 For filesystem sideloading, copy the archive directly into the running host's
@@ -381,7 +412,8 @@ the host can preserve credentials and the selected Cursor team.
 ## Release
 
 In **Actions → release**, run the workflow from `main` and choose a
-patch, minor, or major bump. It commits the version update and generated
-`CHANGELOG.md` directly to `main`, tags that commit as `vX.Y.Z`, then verifies
-(`fmt`/`vet`/`test`), cross-compiles all platforms, and publishes the tarball +
-`checksums.txt` as a GitHub Release, which the kandev marketplace resolves.
+patch, minor, or major bump. The workflow serializes releases and checks the
+tag, manifest, Makefile and built package versions. It runs format, vet, test
+and package checks before it commits metadata or pushes a tag. Pushed tags run
+the same checks before the workflow publishes the archive and `checksums.txt`
+as a GitHub Release, which the Kandev marketplace resolves.

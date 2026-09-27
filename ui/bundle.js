@@ -24,14 +24,14 @@ var AUTO_REFRESH_MS = 60 * 1000;
 var DISCOVERY_RETRY_MS = 2 * 1000;
 var TOPBAR_STYLE_ID = "kandev-provider-usage-topbar-style";
 var TOPBAR_CSS =
-  "#provider-usage-topbar{height:28px;min-height:28px}" +
-  "#provider-usage-topbar[data-provider-usage-mode=icon]{width:28px}" +
-  "@media (max-width:639px){#provider-usage-topbar{height:44px;min-height:44px}" +
-  "#provider-usage-topbar[data-provider-usage-mode=icon]{width:44px}}" +
-  ".provider-usage-menu button{min-height:44px!important;min-width:44px!important}" +
+  "#provider-usage-topbar[data-provider-usage-legacy=true]{height:28px;min-height:28px}" +
+  "#provider-usage-topbar[data-provider-usage-legacy=true][data-provider-usage-mode=icon]{width:28px}" +
+  "@media (max-width:639px){#provider-usage-topbar[data-provider-usage-legacy=true]{height:44px;min-height:44px}" +
+  "#provider-usage-topbar[data-provider-usage-legacy=true][data-provider-usage-mode=icon]{width:44px}}" +
+  ".provider-usage-menu [data-provider-usage-panel] button{min-height:44px!important;min-width:44px!important}" +
   // Match the host utility layer so its important square-button rules can be overridden.
-  "@layer utilities{.provider-usage-menu #provider-usage-topbar{width:auto!important;padding:0 8px!important;align-self:flex-start}" +
-  ".provider-usage-menu #provider-usage-topbar[data-provider-usage-mode=pill]{min-width:72px!important}}";
+  "@layer utilities{.provider-usage-menu #provider-usage-topbar[data-provider-usage-legacy=true]{width:auto!important;padding:0 8px!important;align-self:flex-start}" +
+  ".provider-usage-menu #provider-usage-topbar[data-provider-usage-legacy=true][data-provider-usage-mode=pill]{min-width:72px!important}}";
 var RESET_CREDITS_CSS =
   ".provider-reset-credits summary{list-style:none;cursor:pointer;border-radius:4px}" +
   ".provider-reset-credits summary::-webkit-details-marker{display:none}" +
@@ -835,6 +835,43 @@ function makeTopBarStatus(host) {
     var d = state.data;
     var selected = topBarSelectedProvider(d && d.providers, d && d.current_provider, selectedProvider);
     var pill = pillContent(host, d, selected && selected.provider);
+    var actionIcon = selected
+      ? providerIcon(h, selected.provider, 14)
+      : gaugeIcon(h, 14);
+    var actionText = selected
+      ? ((selected.windows || []).length ? fmtPct(peakPct(selected)) : "—")
+      : undefined;
+    var trigger;
+
+    if (typeof ui.Action === "function") {
+      trigger = h(ui.Action, {
+        id: "provider-usage-topbar",
+        label: "Provider usage",
+        icon: actionIcon,
+        text: actionText,
+        "aria-expanded": open,
+        onFocus: mobileMenu ? undefined : openNow,
+        onClick: function () { if (open) { setOpen(false); } else { openNow(); } },
+      });
+    } else {
+      trigger = h(
+        ui.Button,
+        {
+          id: "provider-usage-topbar",
+          "data-provider-usage-legacy": "true",
+          "data-provider-usage-mode": pill ? "pill" : "icon",
+          type: "button",
+          variant: "outline",
+          size: "sm",
+          className: (pill ? "h-6 gap-1.5 px-2 " : "h-6 w-6 px-0 ") + "rounded-md text-xs font-medium text-muted-foreground hover:text-foreground",
+          "aria-label": "Provider usage",
+          "aria-expanded": open,
+          onFocus: mobileMenu ? undefined : openNow,
+          onClick: function () { if (open) { setOpen(false); } else { openNow(); } },
+        },
+        pill || gaugeIcon(h, 14),
+      );
+    }
 
     return h(
       "div",
@@ -845,26 +882,12 @@ function makeTopBarStatus(host) {
         onMouseEnter: mobileMenu ? undefined : openNow,
         onMouseLeave: mobileMenu ? undefined : scheduleClose,
       },
-      h(
-        ui.Button,
-        {
-          id: "provider-usage-topbar",
-          type: "button",
-          "data-provider-usage-mode": pill ? "pill" : "icon",
-          variant: "outline",
-          size: "sm",
-          className: (pill ? "h-6 gap-1.5 px-2 " : "h-6 w-6 px-0 ") + "rounded-md text-xs font-medium text-muted-foreground hover:text-foreground",
-          "aria-label": "Provider usage",
-          "aria-expanded": open,
-          onFocus: mobileMenu ? undefined : openNow,
-          onClick: function () { if (open) { setOpen(false); } else { openNow(); } },
-        },
-        pill || gaugeIcon(h, 14),
-      ),
+      trigger,
       open
         ? h(
             "div",
             {
+              "data-provider-usage-panel": "true",
               onMouseEnter: mobileMenu ? undefined : cancelClose,
               onMouseLeave: mobileMenu ? undefined : scheduleClose,
               // Stay inside the mobile menu's scroll/focus containment; its drawer is transformed.

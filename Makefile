@@ -1,9 +1,14 @@
-.PHONY: build test fmt vet package package-host clean
+.PHONY: build test test-package-verifier test-release-version fmt check-format vet \
+	package package-host package-file verify-package verify-package-host clean
 
 BIN := bin/kandev-provider-usage
 VERSION := 0.9.3
 STAGE := .build/stage
 PKG_OUT := kandev-provider-usage-$(VERSION).tar.gz
+VERIFY_FULL := .build/verify-full
+VERIFY_HOST := .build/verify-host
+TEST_TMP := $(CURDIR)/.build/tmp
+NODE ?= node
 
 ## plugin-pack lives in the kandev monorepo. Run it from THAT module (go -C) so
 ## its own dependencies resolve against the SDK's go.sum: running it from here
@@ -20,11 +25,24 @@ build:
 
 test:
 	go test ./server/...
-	node --test test/*.test.mjs
-	node --check ui/bundle.js
+	$(NODE) --test test/*.test.mjs
+	$(NODE) --check ui/bundle.js
+	$(MAKE) test-package-verifier
+	$(MAKE) test-release-version
+
+test-package-verifier:
+	mkdir -p $(TEST_TMP)
+	TMPDIR=$(TEST_TMP) sh scripts/test-verify-package.sh
+
+test-release-version:
+	mkdir -p $(TEST_TMP)
+	TMPDIR=$(TEST_TMP) sh scripts/test-verify-release-version.sh
 
 fmt:
 	gofmt -l .
+
+check-format:
+	@test -z "$$(gofmt -l ./server)" || { printf 'gofmt needed:\n'; gofmt -l ./server; exit 1; }
 
 vet:
 	go vet ./server/...
@@ -61,5 +79,25 @@ package-host:
 	rm -rf $(STAGE)
 	@echo "Wrote $(PKG_OUT)"
 
+## Verify the complete archive against the manifest, exact file inventory, and checksums.
+verify-package: package
+	@set -eu; \
+		rm -rf "$(VERIFY_FULL)"; \
+		mkdir -p "$(VERIFY_FULL)"; \
+		tar -xzf "$(PKG_OUT)" -C "$(VERIFY_FULL)"; \
+		sh scripts/verify-package.sh "$(VERIFY_FULL)" full
+
+## Verify the host-platform archive using the same checks as full packaging.
+verify-package-host: package-host
+	@set -eu; \
+		rm -rf "$(VERIFY_HOST)"; \
+		mkdir -p "$(VERIFY_HOST)"; \
+		tar -xzf "$(PKG_OUT)" -C "$(VERIFY_HOST)"; \
+		sh scripts/verify-package.sh "$(VERIFY_HOST)" host "$$(go env GOOS)-$$(go env GOARCH)"
+
+## Print the archive name for release checks without building it.
+package-file:
+	@printf '%s\n' "$(PKG_OUT)"
+
 clean:
-	rm -rf bin $(STAGE) kandev-provider-usage-*.tar.gz
+	rm -rf bin .build kandev-provider-usage-*.tar.gz
