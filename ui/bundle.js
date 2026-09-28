@@ -347,6 +347,8 @@ function spendAmount(amount, currency) {
 
 function cursorExtrasPanel(h, p) {
   if (p.provider !== "cursor") return null;
+  var daily = p.daily_usage;
+  if (daily && !(Date.parse(daily.start_at) <= Date.now() && Date.now() < Date.parse(daily.end_at))) daily = null;
   var spend = p.extra_usage;
   var spendLabel = spend && spend.label
     ? spend.label
@@ -359,6 +361,13 @@ function cursorExtrasPanel(h, p) {
       ),
       spend && typeof spend.limit === "number" && spend.limit > 0
         ? h("span", { style: { color: "var(--muted-foreground)" } }, "Limit " + spendAmount(spend.limit, spend.currency) + (spend.scope === "team" ? " · shared across the team" : "")) : null,
+    ),
+    h("div", { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+      h("div", { style: { display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "baseline" } },
+        h("span", { style: { fontSize: "12px", fontWeight: 600 } }, "Daily Usage"),
+        h("span", { style: { color: "var(--muted-foreground)", textAlign: "right" } }, daily ? spendAmount(daily.used, daily.currency) + " spent" : "Not reported"),
+      ),
+      h("span", { style: { color: "var(--muted-foreground)" } }, "Today · UTC"),
     ),
     p.detail_warning ? h("p", { style: { margin: 0, fontSize: "10.5px", lineHeight: 1.5, color: "var(--muted-foreground)" } }, p.detail_warning) : null,
   );

@@ -234,6 +234,7 @@ func (c *cursorClient) fetchWithAuth(ctx context.Context, auth cursorAuth, teamI
 		return nil, errors.New("Cursor did not return usable account usage.")
 	}
 	out.accountID, out.accountEmail = id, email
+	out.DailyUsage = c.fetchDailyUsage(ctx, auth, 0, 0, now)
 	if len(summary) == 0 && len(rpc.object("planUsage")) == 0 {
 		out.DetailWarning = "Detailed quotas unavailable; showing the available quota."
 	}

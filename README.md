@@ -256,6 +256,18 @@ your allowlist. The Cursor panel always preserves the CLI's Total, Auto and API
 windows when available. Its compact pill uses Total Usage; a narrower exhausted
 API allowance is shown as "Limit reached" in the panel.
 
+**Daily Usage** shows today's reported usage cost in USD, from midnight UTC
+through the latest refresh, in both the provider panel and phone Status drawer.
+It sums Cursor's paginated dashboard events, preferring `chargedCents` (which
+already includes Cursor fees), or `tokenUsage.totalCents` plus `cursorTokenFee`
+when the charged amount is absent. Reported plan-covered costs are included;
+this is not necessarily an additional bill. The label explicitly says **Today · UTC**.
+Selected-team requests filter to that team and your member ID. Missing costs,
+failed or incomplete history, and unavailable member identity show **Not reported**;
+an explicitly empty day shows **$0.00**. Fetches are limited to 2,000 events and
+five seconds, and yesterday's cached amount is hidden after midnight UTC.
+The existing refresh interval also applies to Daily Usage.
+
 If you belong to multiple Cursor teams, expand **Cursor** in
 Settings → Plugins → Provider Usage, choose a **Team** by name and click
 **Save team**. **Reload teams** refreshes the list from your signed-in account.
