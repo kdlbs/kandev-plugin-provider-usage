@@ -171,12 +171,12 @@ func TestCursorFetchEnrichesOnlySameAccount(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, out.Windows, 3)
 	require.Empty(t, out.DetailWarning)
-	require.Equal(t, int32(4), count.Load())
+	require.Equal(t, int32(5), count.Load())
 	base := cursorBase(t)
 	base.accountID = "another-account"
 	_, err = c.fetch(context.Background(), nil, base, cursorTestNow)
 	require.ErrorContains(t, err, "different or unverified account")
-	require.Equal(t, int32(5), count.Load(), "mismatched accounts stop before all detail calls")
+	require.Equal(t, int32(6), count.Load(), "mismatched accounts stop before all detail calls")
 	base.accountID, base.accountEmail = "", ""
 	_, err = c.fetch(context.Background(), nil, base, cursorTestNow)
 	require.ErrorContains(t, err, "unverified account")
@@ -352,11 +352,15 @@ func TestCursorRequestsHaveCorrectAuthScopeAndUser(t *testing.T) {
 			if r.Method != http.MethodPost || r.Header.Get("Connect-Protocol-Version") != "1" || r.Header.Get("Authorization") == "" || r.Header.Get("Cookie") != "" {
 				t.Error("incorrect RPC request auth or method")
 			}
+		} else if r.URL.Path == "/api/dashboard/get-filtered-usage-events" {
+			if r.Method != http.MethodPost || r.Header.Get("Cookie") == "" || r.Header.Get("Origin") == "" || r.Header.Get("Authorization") != "" {
+				t.Error("incorrect daily usage request auth or method")
+			}
 		} else if r.Method != http.MethodGet || r.Header.Get("Cookie") == "" || r.Header.Get("Authorization") != "" {
 			t.Error("incorrect REST request auth or method")
 		}
 		switch r.URL.Path {
-		case "/api/auth/me", "/api/usage-summary", "/aiserver.v1.DashboardService/GetCurrentPeriodUsage":
+		case "/api/auth/me", "/api/usage-summary", "/aiserver.v1.DashboardService/GetCurrentPeriodUsage", "/api/dashboard/get-filtered-usage-events":
 		case "/api/usage":
 			if r.URL.Query().Get("user") != "user_test" {
 				t.Error("usage request must identify the verified user")
@@ -390,7 +394,7 @@ func TestCursorEnrichmentUsesSharedSnapshotAndHonorsAllowlist(t *testing.T) {
 	require.Len(t, report.Providers[0].Windows, 3)
 	_, err := p.HandleWebhook(context.Background(), webhookGet(webhookKeyProviders, ""))
 	require.NoError(t, err)
-	require.Equal(t, int32(4), count.Load(), "webhooks must reuse the warm snapshot")
+	require.Equal(t, int32(5), count.Load(), "webhooks must reuse the warm snapshot")
 	encoded, err := json.Marshal(report)
 	require.NoError(t, err)
 	require.NotContains(t, string(encoded), "cursor@example.test")
@@ -399,7 +403,7 @@ func TestCursorEnrichmentUsesSharedSnapshotAndHonorsAllowlist(t *testing.T) {
 	p = newTestPlugin(t, codexbarConfig(map[string]any{"codexbar_providers": "claude"}), nil, providerRunner(nil, map[string][]byte{"claude": []byte(sampleClaudeJSON)}))
 	p.cursor = cursorTestClient(t, cursorFixtureHandler(&count))
 	p.pollOnce(context.Background(), 0)
-	require.Equal(t, int32(4), count.Load())
+	require.Equal(t, int32(5), count.Load())
 }
 
 func TestCursorDirectUsageSurvivesCodexbarInstallFailure(t *testing.T) {
@@ -416,7 +420,7 @@ func TestCursorDirectUsageSurvivesCodexbarInstallFailure(t *testing.T) {
 
 	require.False(t, report.Codexbar.Installed)
 	require.Equal(t, int32(1), codexbarCalls.Load(), "only the failed version probe reaches codexbar")
-	require.Equal(t, int32(4), cursorCalls.Load(), "identity and detail APIs are fetched directly")
+	require.Equal(t, int32(5), cursorCalls.Load(), "identity and detail APIs are fetched directly")
 	require.Empty(t, report.Unavailable)
 	require.Len(t, report.Providers, 1)
 	require.Equal(t, "cursor", report.Providers[0].Provider)

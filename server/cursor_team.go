@@ -286,6 +286,11 @@ func (c *cursorClient) fetchTeamUsage(ctx context.Context, auth cursorAuth, team
 	if len(out.Windows) == 0 && out.ExtraUsage == nil {
 		return nil, errors.New("No usage was reported for you in this team. Check the selected team and this account's access.")
 	}
+	userID := cursorID(details["userId"])
+	if userID == 0 && member != nil {
+		userID = cursorID(member["userId"])
+	}
+	out.DailyUsage = c.fetchDailyUsage(ctx, auth, teamID, userID, now)
 	if summary == nil {
 		out.DetailWarning = cursorTeamMissingDetails(out)
 	}

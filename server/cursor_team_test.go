@@ -42,6 +42,8 @@ func cursorTeamFixtureHandler(t *testing.T, overrides map[string]string, calls *
 			body = cursorTeamDetailsFixture
 		case "/api/dashboard/get-team-spend":
 			body = cursorTeamSpendFixture
+		case "/api/dashboard/get-filtered-usage-events":
+			body = `{}`
 		case "/api/usage-summary":
 			body = `{"teamId":30677936,` + strings.TrimSpace(cursorEnterpriseSummary)[1:]
 		default:
@@ -88,7 +90,7 @@ func TestCursorTeamSelectionUsesRequestedTeamAndCurrentMember(t *testing.T) {
 	base.ExtraUsage = &UsageSpend{Used: 999, Currency: "USD"}
 	out, err := c.fetch(context.Background(), map[string]any{cursorTeamSetting: cursorSelectedTeam}, base, cursorTestNow)
 	require.NoError(t, err)
-	require.Equal(t, int32(5), calls.Load())
+	require.Equal(t, int32(6), calls.Load())
 	require.Equal(t, cursorSelectedTeam, out.TeamID)
 	require.Equal(t, "Selected team", out.TeamName)
 	require.Len(t, out.Windows, 1, "unverified account-summary Auto/API usage must not be retained")
