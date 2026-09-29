@@ -9,6 +9,8 @@ function mount(slot = "main-top-bar", slotProps, saved = "", options = {}) {
   const hooks = [], pending = [], intervals = new Map(), timeouts = new Map();
   const registrations = new Map();
   let definition, cursor = 0, timerID = 0, writes = 0;
+  let now = options.now ?? Date.now();
+  const deadlines = new Map();
   function HostAction() {}
   const React = {
     useState(initial) {
@@ -63,11 +65,13 @@ function mount(slot = "main-top-bar", slotProps, saved = "", options = {}) {
   vm.runInNewContext(source + (slot === "cursor-team-settings" ? "\nwindow.registerTestComponent(makeCursorTeamSettings);" : ""), {
     fetch: host.api.fetch,
     AbortController,
+    Date: class extends Date { static now() { return now; } },
     window: { registerKandevPlugin(_id, plugin) { definition = plugin; },
       registerTestComponent(factory) { registrations.set(slot, factory(host)); },
       localStorage: { getItem: () => saved, setItem: (_key, value) => { saved = value; } }, innerWidth: 390, innerHeight: 844 },
     setInterval: fn => { intervals.set(++timerID, fn); return timerID; }, clearInterval: id => intervals.delete(id),
-    setTimeout: fn => { timeouts.set(++timerID, fn); return timerID; }, clearTimeout: id => timeouts.delete(id),
+    setTimeout: (fn, delay) => { timeouts.set(++timerID, fn); deadlines.set(timerID, now + delay); return timerID; },
+    clearTimeout: id => { timeouts.delete(id); deadlines.delete(id); },
   });
   const registry = {
     registerComponent: (name, component) => registrations.set(name, component),
@@ -86,6 +90,15 @@ function mount(slot = "main-top-bar", slotProps, saved = "", options = {}) {
     return tree;
   }
   return { render, requests, intervals, timeouts, registrations,
+    advanceTo(at) {
+      now = at;
+      for (const [id, deadline] of deadlines) {
+        if (deadline > now) continue;
+        const fn = timeouts.get(id);
+        timeouts.delete(id); deadlines.delete(id);
+        fn?.();
+      }
+    },
     Action: ui.Action,
     translationCalls,
     translationCatalogs,
@@ -800,3 +813,47 @@ for (const fails of [false, true]) {
     assert.equal(app.requests.length, requests, "no providers request after unmount");
   });
 }
+
+
+for (const [slot, props] of [
+  ["main-top-bar", {}],
+  ["chat-top-bar", {}],
+  ["app-status-bar-right", { presentation: "mobile-drawer" }],
+  ["plugin-settings", {}],
+]) {
+  test(`${slot} expires daily spend at UTC midnight without a network update`, async () => {
+    const midnight = Date.parse("2026-09-30T00:00:00Z");
+    const app = mount(slot, props, "cursor", { now: midnight - 1000 });
+    const data = { ...snapshot, status_bar_mode: "both", pill_providers: ["cursor"], providers: [{
+      provider: "cursor", windows: [{ label: "Total Usage", utilization_pct: 25 }],
+      daily_usage: { used: 12.34, currency: "USD", start_at: "2026-09-29T00:00:00Z", end_at: "2026-09-30T00:00:00Z" },
+    }] };
+    let tree;
+    if (slot === "plugin-settings") tree = await loadSettings(app, data);
+    else {
+      app.render(); app.requests[0].resolve(data); await flush(); tree = app.render();
+      if (slot !== "app-status-bar-right") { trigger(tree).props.onFocus(); tree = app.render(); }
+    }
+    assert.match(text(tree), /Daily Usage.*12\.34 spent/);
+    const requests = app.requests.length;
+    const writes = app.writes;
+    app.advanceTo(midnight - 1);
+    assert.equal(app.writes, writes, "no premature update");
+    app.advanceTo(midnight);
+    assert.ok(app.writes > writes, "day boundary triggers a render without a poll");
+    assert.match(text(app.render()), /Daily UsageNot reported/);
+    assert.equal(app.requests.length, requests, "expiry is local, not a provider fetch");
+    app.unmount();
+  });
+}
+
+test("daily spend expiry timer is cancelled on unmount", async () => {
+  const app = mount("plugin-settings", {}, "", { now: Date.parse("2026-09-29T23:59:59Z") });
+  await loadSettings(app, { providers: [{ provider: "cursor", windows: [], daily_usage: { used: 1, currency: "USD", start_at: "2026-09-29T00:00:00Z", end_at: "2026-09-30T00:00:00Z" } }] });
+  assert.equal(app.timeouts.size, 1);
+  app.unmount();
+  assert.equal(app.timeouts.size, 0);
+  const writes = app.writes;
+  app.advanceTo(Date.parse("2026-09-30T00:00:00Z"));
+  assert.equal(app.writes, writes);
+});

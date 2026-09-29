@@ -94,8 +94,8 @@ func (c *cursorClient) fetchDailyUsage(ctx context.Context, auth cursorAuth, tea
 
 func cursorEventCents(event cursorObject) *float64 {
 	// chargedCents already includes Cursor's fee; do not count the fee twice.
-	if _, present := event["chargedCents"]; present {
-		return event.number("chargedCents")
+	if cents := event.number("chargedCents"); cents != nil {
+		return cents
 	}
 	cents := event.object("tokenUsage").number("totalCents")
 	if cents == nil {

@@ -345,6 +345,25 @@ function spendAmount(amount, currency) {
   catch (_err) { return amount.toFixed(2) + " " + currency; }
 }
 
+// Expire an open daily-spend view at its day boundary without waiting for a
+// network poll. All usage surfaces share this hook and clean up on unmount.
+function useDailyUsageExpiry(React, report) {
+  var tick = React.useState(0);
+  React.useEffect(function () {
+    var now = Date.now();
+    var expiresAt = Infinity;
+    ((report && report.providers) || []).forEach(function (provider) {
+      var daily = provider.daily_usage;
+      if (provider.provider !== "cursor" || !daily) return;
+      var end = Date.parse(daily.end_at);
+      if (Date.parse(daily.start_at) <= now && end > now) expiresAt = Math.min(expiresAt, end);
+    });
+    if (!isFinite(expiresAt)) return;
+    var timer = setTimeout(function () { tick[1](function (value) { return value + 1; }); }, expiresAt - now);
+    return function () { clearTimeout(timer); };
+  }, [report]);
+}
+
 function cursorExtrasPanel(h, p) {
   if (p.provider !== "cursor") return null;
   var daily = p.daily_usage;
@@ -761,6 +780,7 @@ function makeTopBarStatus(host) {
     var stateHook = React.useState({ loading: false, data: null, error: null });
     var state = stateHook[0];
     var setState = stateHook[1];
+    useDailyUsageExpiry(React, state.data);
     var selectedProviderHook = React.useState(function () { return readTopBarProviderPreference(); });
     var selectedProvider = selectedProviderHook[0];
     var setSelectedProvider = selectedProviderHook[1];
@@ -1163,6 +1183,7 @@ function makeAppStatusBarUsage(host) {
     var stateHook = React.useState({ loading: true, data: null, error: null });
     var state = stateHook[0];
     var setState = stateHook[1];
+    useDailyUsageExpiry(React, state.data);
     var indexHook = React.useState(0);
     var index = indexHook[0];
     var setIndex = indexHook[1];
@@ -1937,6 +1958,7 @@ function makeSettingsStatus(host) {
     var stateHook = React.useState({ loading: true, data: null, error: null });
     var state = stateHook[0];
     var setState = stateHook[1];
+    useDailyUsageExpiry(React, state.data);
     var updateHook = React.useState({ loading: false, error: null, message: null });
     var updateState = updateHook[0], setUpdateState = updateHook[1];
     var updating = React.useRef(false);
