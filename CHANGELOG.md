@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.5] - 2026-09-30
+
+### Changed
+
+- Include release archive hashes in checksums (#33) (623c0d0)
+
+
 ## [0.9.4] - 2026-09-30
 
 ### Changed
