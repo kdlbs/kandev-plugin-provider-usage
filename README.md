@@ -82,6 +82,14 @@ a projected month-end total:
   ("48% in reserve"). Copilot labels its primary window Premium interactions;
   when CodexBar omits pace but supplies its monthly reset, the plugin derives
   reserve or deficit against linear calendar-month consumption.
+- **Codex pace**: each quota shows "X% in reserve", "X% in deficit", or
+  "On pace". When CodexBar omits the summary, the plugin compares percentage
+  used with percentage of the reported window elapsed at the usage snapshot.
+  Reserve means usage is below that pace; deficit means it is above.
+  This is distinct from the quota remaining. The phone Status drawer shows
+  pace for its displayed quota, too. Derived pace stays hidden when the
+  usage percentage, duration, or reset is unknown, the window has expired,
+  or less than 3% has elapsed. Scoped extra quotas use their own window data.
 - **Cursor details**: Total, Auto and API usage show the percentage used, with
   bars that fill as usage increases, reset times and extra spend.
   The backend supplements CodexBar with Cursor's dashboard endpoints,

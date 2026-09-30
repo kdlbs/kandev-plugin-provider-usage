@@ -307,6 +307,49 @@ test("Copilot shows the premium-interaction reserve pace", () => {
 
 const resetCreditNow = Date.parse("2026-09-09T12:00:00Z");
 
+test("Codex shows reserve and deficit beside the correct quotas", () => {
+  const { providerPanel, statusMeterDrawerRow } = statusMeterHelpers(resetCreditNow);
+  const usage = {
+    provider: "codex", plan: "pro",
+    windows: [
+      { label: "5-hour", utilization_pct: 10, pace: { stage: "behind", summary: "30% in reserve | Expected 40% used" } },
+      { label: "weekly", utilization_pct: 13, pace: { stage: "ahead", summary: "5% in deficit | Expected 8% used" } },
+      { label: "Scoped quota", utilization_pct: 20, scoped: true, pace: { stage: "behind", summary: "10% in reserve | Expected 30% used" } },
+    ],
+  };
+  const panel = providerPanel({ jsx: element }, usage, 75, 90, "", () => {}, true);
+  assert.match(renderedText(panel), /5-hour10% used30% in reserveweekly13% used5% in deficit/);
+  assert.match(renderedText(panel), /Scoped quota20% used10% in reserve/);
+  assert.doesNotMatch(renderedText(panel), /Expected/);
+  const drawer = statusMeterDrawerRow({ jsx: element }, usage, 75, 90);
+  assert.match(renderedText(drawer), /13% used.*5% in deficit/);
+  assert.doesNotMatch(renderedText(drawer), /30% in reserve/);
+});
+
+test("Codex weekly-only panels use their window pace and leave unknown pace hidden", () => {
+  const { providerPanel, statusMeterDrawerRow } = statusMeterHelpers(resetCreditNow);
+  const usage = {
+    provider: "codex",
+    pace_primary: { summary: "Wrong primary pace" },
+    pace_secondary: { summary: "Wrong indexed pace" },
+    windows: [
+      { label: "weekly", utilization_pct: 13, pace: { stage: "onPace", summary: "On pace | Expected 13% used" } },
+      { label: "Scoped quota", utilization_pct: 50, scoped: true },
+    ],
+  };
+  const panel = providerPanel({ jsx: element }, usage, 75, 90, "", () => {}, false);
+  assert.match(renderedText(panel), /weekly13% usedOn paceScoped quota50% used/);
+  assert.doesNotMatch(renderedText(panel), /Wrong/);
+  assert.match(renderedText(statusMeterDrawerRow({ jsx: element }, usage, 75, 90)), /On pace/);
+  delete usage.windows[0].pace;
+  for (const component of [
+    providerPanel({ jsx: element }, usage, 75, 90, "", () => {}, false),
+    statusMeterDrawerRow({ jsx: element }, usage, 75, 90),
+  ]) {
+    assert.doesNotMatch(renderedText(component), /Wrong|On pace|in reserve|in deficit/);
+  }
+});
+
 function codexPanel(resetCredits, now = resetCreditNow) {
   const { providerPanel } = statusMeterHelpers(now);
   return providerPanel({ jsx: element }, {

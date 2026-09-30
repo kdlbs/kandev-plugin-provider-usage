@@ -310,7 +310,7 @@ function cleanWindow(h, w, warn, high, pace, showLimitReached) {
       reset ? h("span", { style: { opacity: 0.5 } }, reset) : null,
     ),
     w.detail ? h("div", { style: { fontSize: "10.5px", color: "var(--muted-foreground)" } }, w.detail) : null,
-    pace ? h("div", { style: { fontSize: "10.5px", opacity: 0.45, marginTop: "-1px" } }, pace) : null,
+    pace ? h("div", { style: { fontSize: "11px", color: "var(--muted-foreground)", fontVariantNumeric: "tabular-nums" } }, pace) : null,
   );
 }
 
@@ -318,7 +318,10 @@ function providerWindows(h, p, warn, high) {
   var windows = p.windows || [];
   var paceFor = [p.pace_primary, p.pace_secondary];
   if (p.provider !== "cursor") {
-    return windows.map(function (w, i) { return h("div", { key: i }, cleanWindow(h, w, warn, high, i < 2 ? paceText(paceFor[i]) : "")); });
+    return windows.map(function (w, i) {
+      var pace = p.provider === "codex" ? w.pace : i < 2 ? paceFor[i] : null;
+      return h("div", { key: i }, cleanWindow(h, w, warn, high, paceText(pace)));
+    });
   }
   // Missing plan-specific metrics are distinct from a reported 0% usage.
   var labels = ["Total Usage", "Auto Usage", "API Usage"];
@@ -1089,6 +1092,8 @@ function statusMeterDrawerRow(host, usage, warn, high) {
       ),
       usage.provider === "cursor" ? h("div", { style: { display: "flex", flexDirection: "column", gap: "13px", marginTop: "8px" } }, providerWindows(h, usage, warn, high))
         : detail.window ? statusMeterTrack(h, detail, warn, high) : null,
+      usage.provider === "codex" && detail.window && paceText(detail.window.pace)
+        ? h("div", { style: { fontSize: "11px", color: "var(--muted-foreground)", fontVariantNumeric: "tabular-nums" } }, paceText(detail.window.pace)) : null,
       resetCreditsPanel(h, usage),
       cursorExtrasPanel(h, usage),
     ),

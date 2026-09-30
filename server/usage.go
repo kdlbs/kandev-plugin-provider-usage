@@ -24,6 +24,9 @@ type UtilizationWindow struct {
 	// can exclude it from the at-a-glance peak while still listing it.
 	Scoped bool   `json:"scoped,omitempty"`
 	Detail string `json:"detail,omitempty"` // e.g. included requests or a shared team allowance
+	// Keep Codex pace with its window: omitted primary/secondary slots are
+	// removed from Windows, so array indices cannot identify their pace sides.
+	Pace *Pace `json:"pace,omitempty"`
 }
 
 // Pace carries codexbar's optional burn-rate summary for a window ("52% in
@@ -176,6 +179,7 @@ type cbWindow struct {
 	ResetDescription string  `json:"resetDescription"`
 	UsedPercent      float64 `json:"usedPercent"`
 	WindowMinutes    int     `json:"windowMinutes"`
+	usageReported    bool
 }
 
 // UnmarshalJSON fills the fields the port spells with underscores. A window the
@@ -183,14 +187,22 @@ type cbWindow struct {
 // rule can't lose a legitimately empty window.
 func (w *cbWindow) UnmarshalJSON(data []byte) error {
 	type alias cbWindow
-	if err := json.Unmarshal(data, (*alias)(w)); err != nil {
+	camel := struct {
+		*alias
+		UsedPercent *float64 `json:"usedPercent"`
+	}{alias: (*alias)(w)}
+	if err := json.Unmarshal(data, &camel); err != nil {
 		return err
 	}
+	w.usageReported = camel.UsedPercent != nil
+	if camel.UsedPercent != nil {
+		w.UsedPercent = *camel.UsedPercent
+	}
 	var snake struct {
-		ResetsAt         string  `json:"resets_at"`
-		ResetDescription string  `json:"reset_description"`
-		UsedPercent      float64 `json:"used_percent"`
-		WindowMinutes    int     `json:"window_minutes"`
+		ResetsAt         string          `json:"resets_at"`
+		ResetDescription string          `json:"reset_description"`
+		UsedPercent      json.RawMessage `json:"used_percent"`
+		WindowMinutes    int             `json:"window_minutes"`
 	}
 	_ = json.Unmarshal(data, &snake) // best-effort, see cbUsage.UnmarshalJSON
 	if w.ResetsAt == "" {
@@ -199,8 +211,12 @@ func (w *cbWindow) UnmarshalJSON(data []byte) error {
 	if w.ResetDescription == "" {
 		w.ResetDescription = snake.ResetDescription
 	}
-	if w.UsedPercent == 0 {
-		w.UsedPercent = snake.UsedPercent
+	var snakePercent *float64
+	if json.Unmarshal(snake.UsedPercent, &snakePercent) == nil && snakePercent != nil {
+		w.usageReported = true
+		if w.UsedPercent == 0 {
+			w.UsedPercent = *snakePercent
+		}
 	}
 	if w.WindowMinutes == 0 {
 		w.WindowMinutes = snake.WindowMinutes
@@ -264,6 +280,40 @@ func (e cbEntry) toProviderUsage(now time.Time) *ProviderUsage {
 		pu.PacePrime = e.Pace.Primary.toPace()
 		pu.PaceSec = e.Pace.Secondary.toPace()
 	}
+	if e.Provider == "codex" {
+		paces := [3]*Pace{pu.PacePrime, pu.PaceSec, nil}
+		index := 0
+		for slot, window := range []*cbWindow{e.Usage.Primary, e.Usage.Secondary, e.Usage.Tertiary} {
+			if window == nil {
+				continue
+			}
+			pace := paces[slot]
+			if pace == nil || pace.Summary == "" {
+				// Evaluate consumption and elapsed time at the same snapshot.
+				pace = nil
+				if now.Before(pu.Windows[index].ResetAt) && !pu.FetchedAt.After(now) {
+					pace = window.fixedWindowPace(pu.FetchedAt)
+				}
+			}
+			pu.Windows[index].Pace = pace
+			switch slot {
+			case 0:
+				pu.PacePrime = pace
+			case 1:
+				pu.PaceSec = pace
+			}
+			index++
+		}
+		for _, extra := range e.Usage.Extra {
+			if extra.Window == nil || extra.ID == codexResetCreditsWindowID {
+				continue
+			}
+			if now.Before(pu.Windows[index].ResetAt) && !pu.FetchedAt.After(now) {
+				pu.Windows[index].Pace = extra.Window.fixedWindowPace(pu.FetchedAt)
+			}
+			index++
+		}
+	}
 	// CodexBar's Copilot API response currently carries a calendar-month reset
 	// but omits windowMinutes and pace. Derive the same linear reserve/deficit
 	// signal from the previous calendar-month boundary, without replacing pace
@@ -272,6 +322,19 @@ func (e cbEntry) toProviderUsage(now time.Time) *ProviderUsage {
 		pu.PacePrime = copilotMonthlyPace(pu.Windows[0], now)
 	}
 	return pu
+}
+
+func (w *cbWindow) fixedWindowPace(now time.Time) *Pace {
+	if !w.usageReported || w.WindowMinutes <= 0 || w.WindowMinutes > int(math.MaxInt64/int64(time.Minute)) ||
+		math.IsNaN(w.UsedPercent) || math.IsInf(w.UsedPercent, 0) || w.UsedPercent < 0 || w.UsedPercent > 100 {
+		return nil
+	}
+	reset := parseTimeOr(w.ResetsAt, time.Time{})
+	if reset.IsZero() {
+		return nil
+	}
+	start := reset.Add(-time.Duration(w.WindowMinutes) * time.Minute)
+	return linearUsagePace(w.UsedPercent, start, reset, now)
 }
 
 func copilotMonthlyPace(window UtilizationWindow, now time.Time) *Pace {
