@@ -196,6 +196,50 @@ func TestCodexPaceSnakeCaseAndEmptySummary(t *testing.T) {
 	require.Nil(t, u.Windows[0].Pace, "do not derive pace from a future snapshot")
 }
 
+func TestCodexPaceForScopedQuotas(t *testing.T) {
+	const raw = `[{"provider":"codex","usage":{"extraRateWindows":[
+	  {"id":"reset-credits","window":{"usedPercent":2}},
+	  {"id":"missing","window":null},
+	  {"id":"scoped","title":"Scoped quota","window":{
+	    "usedPercent":10,"windowMinutes":300,"resetsAt":"2026-09-30T15:00:00Z"}}
+	],"updatedAt":"2026-09-30T12:00:00Z"}}]`
+	entries, err := parseCodexbarUsage([]byte(raw))
+	require.NoError(t, err)
+	u := entries[0].toProviderUsage(time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC))
+	require.Len(t, u.Windows, 1, "manual resets and absent windows stay excluded")
+	require.True(t, u.Windows[0].Scoped)
+	require.Equal(t, &Pace{Stage: "behind", Summary: "30% in reserve | Expected 40% used"}, u.Windows[0].Pace)
+}
+
+func TestCodexPaceRequiresReportedUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		usage    string
+		wantPace bool
+	}{
+		{"omitted", "", false},
+		{"null", `"usedPercent":null,`, false},
+		{"snake null", `"used_percent":null,`, false},
+		{"snake invalid", `"used_percent":"unknown",`, false},
+		{"reported zero", `"usedPercent":0,`, true},
+		{"snake reported zero", `"used_percent":0,`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := `[{"provider":"codex","usage":{"primary":{` + tc.usage +
+				`"windowMinutes":300,"resetsAt":"2026-09-30T15:00:00Z"}}}]`
+			entries, err := parseCodexbarUsage([]byte(raw))
+			require.NoError(t, err)
+			u := entries[0].toProviderUsage(time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC))
+			if tc.wantPace {
+				require.Equal(t, &Pace{Stage: "behind", Summary: "40% in reserve | Expected 40% used"}, u.Windows[0].Pace)
+			} else {
+				require.Nil(t, u.Windows[0].Pace)
+				require.Nil(t, u.PacePrime)
+			}
+		})
+	}
+}
+
 func TestFixedWindowPaceRequiresReliableInputs(t *testing.T) {
 	reset := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {
@@ -219,6 +263,7 @@ func TestFixedWindowPaceRequiresReliableInputs(t *testing.T) {
 		{"invalid usage", cbWindow{UsedPercent: 101, WindowMinutes: 300, ResetsAt: reset.Format(time.RFC3339)}, reset.Add(-time.Hour), nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			tc.window.usageReported = true
 			require.Equal(t, tc.want, tc.window.fixedWindowPace(tc.now))
 		})
 	}

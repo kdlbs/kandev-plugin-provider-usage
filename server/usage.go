@@ -179,6 +179,7 @@ type cbWindow struct {
 	ResetDescription string  `json:"resetDescription"`
 	UsedPercent      float64 `json:"usedPercent"`
 	WindowMinutes    int     `json:"windowMinutes"`
+	usageReported    bool
 }
 
 // UnmarshalJSON fills the fields the port spells with underscores. A window the
@@ -186,14 +187,22 @@ type cbWindow struct {
 // rule can't lose a legitimately empty window.
 func (w *cbWindow) UnmarshalJSON(data []byte) error {
 	type alias cbWindow
-	if err := json.Unmarshal(data, (*alias)(w)); err != nil {
+	camel := struct {
+		*alias
+		UsedPercent *float64 `json:"usedPercent"`
+	}{alias: (*alias)(w)}
+	if err := json.Unmarshal(data, &camel); err != nil {
 		return err
 	}
+	w.usageReported = camel.UsedPercent != nil
+	if camel.UsedPercent != nil {
+		w.UsedPercent = *camel.UsedPercent
+	}
 	var snake struct {
-		ResetsAt         string  `json:"resets_at"`
-		ResetDescription string  `json:"reset_description"`
-		UsedPercent      float64 `json:"used_percent"`
-		WindowMinutes    int     `json:"window_minutes"`
+		ResetsAt         string          `json:"resets_at"`
+		ResetDescription string          `json:"reset_description"`
+		UsedPercent      json.RawMessage `json:"used_percent"`
+		WindowMinutes    int             `json:"window_minutes"`
 	}
 	_ = json.Unmarshal(data, &snake) // best-effort, see cbUsage.UnmarshalJSON
 	if w.ResetsAt == "" {
@@ -202,8 +211,12 @@ func (w *cbWindow) UnmarshalJSON(data []byte) error {
 	if w.ResetDescription == "" {
 		w.ResetDescription = snake.ResetDescription
 	}
-	if w.UsedPercent == 0 {
-		w.UsedPercent = snake.UsedPercent
+	var snakePercent *float64
+	if json.Unmarshal(snake.UsedPercent, &snakePercent) == nil && snakePercent != nil {
+		w.usageReported = true
+		if w.UsedPercent == 0 {
+			w.UsedPercent = *snakePercent
+		}
 	}
 	if w.WindowMinutes == 0 {
 		w.WindowMinutes = snake.WindowMinutes
@@ -291,6 +304,15 @@ func (e cbEntry) toProviderUsage(now time.Time) *ProviderUsage {
 			}
 			index++
 		}
+		for _, extra := range e.Usage.Extra {
+			if extra.Window == nil || extra.ID == codexResetCreditsWindowID {
+				continue
+			}
+			if now.Before(pu.Windows[index].ResetAt) && !pu.FetchedAt.After(now) {
+				pu.Windows[index].Pace = extra.Window.fixedWindowPace(pu.FetchedAt)
+			}
+			index++
+		}
 	}
 	// CodexBar's Copilot API response currently carries a calendar-month reset
 	// but omits windowMinutes and pace. Derive the same linear reserve/deficit
@@ -303,7 +325,7 @@ func (e cbEntry) toProviderUsage(now time.Time) *ProviderUsage {
 }
 
 func (w *cbWindow) fixedWindowPace(now time.Time) *Pace {
-	if w.WindowMinutes <= 0 || w.WindowMinutes > int(math.MaxInt64/int64(time.Minute)) ||
+	if !w.usageReported || w.WindowMinutes <= 0 || w.WindowMinutes > int(math.MaxInt64/int64(time.Minute)) ||
 		math.IsNaN(w.UsedPercent) || math.IsInf(w.UsedPercent, 0) || w.UsedPercent < 0 || w.UsedPercent > 100 {
 		return nil
 	}

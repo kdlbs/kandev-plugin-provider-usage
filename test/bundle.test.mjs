@@ -314,10 +314,12 @@ test("Codex shows reserve and deficit beside the correct quotas", () => {
     windows: [
       { label: "5-hour", utilization_pct: 10, pace: { stage: "behind", summary: "30% in reserve | Expected 40% used" } },
       { label: "weekly", utilization_pct: 13, pace: { stage: "ahead", summary: "5% in deficit | Expected 8% used" } },
+      { label: "Scoped quota", utilization_pct: 20, scoped: true, pace: { stage: "behind", summary: "10% in reserve | Expected 30% used" } },
     ],
   };
   const panel = providerPanel({ jsx: element }, usage, 75, 90, "", () => {}, true);
   assert.match(renderedText(panel), /5-hour10% used30% in reserveweekly13% used5% in deficit/);
+  assert.match(renderedText(panel), /Scoped quota20% used10% in reserve/);
   assert.doesNotMatch(renderedText(panel), /Expected/);
   const drawer = statusMeterDrawerRow({ jsx: element }, usage, 75, 90);
   assert.match(renderedText(drawer), /13% used.*5% in deficit/);

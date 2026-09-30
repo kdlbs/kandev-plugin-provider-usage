@@ -88,7 +88,8 @@ a projected month-end total:
   Reserve means usage is below that pace; deficit means it is above.
   This is distinct from the quota remaining. The phone Status drawer shows
   pace for its displayed quota, too. Derived pace stays hidden when the
-  duration/reset is unknown, the window has expired, or less than 3% has elapsed.
+  usage percentage, duration, or reset is unknown, the window has expired,
+  or less than 3% has elapsed. Scoped extra quotas use their own window data.
 - **Cursor details**: Total, Auto and API usage show the percentage used, with
   bars that fill as usage increases, reset times and extra spend.
   The backend supplements CodexBar with Cursor's dashboard endpoints,
