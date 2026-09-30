@@ -255,13 +255,14 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "package=$PACKAGE_FILE" >> "$GITHUB_OUTPUT"
 
-      - name: Extract checksums
+      - name: Generate release checksums
         working-directory: plugin
         env:
           PACKAGE_FILE: ${{ steps.verify.outputs.package }}
         run: |
           set -euo pipefail
           tar -xOzf "$PACKAGE_FILE" checksums.txt > checksums.txt
+          sha256sum "$PACKAGE_FILE" >> checksums.txt
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2

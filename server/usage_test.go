@@ -129,6 +129,146 @@ func TestCopilotMonthlyPaceFallback(t *testing.T) {
 	}, reset), "do not reuse an expired window")
 }
 
+func TestCodexPaceFallback(t *testing.T) {
+	const raw = `[{"provider":"codex","source":"oauth","usage":{
+	  "primary":{"usedPercent":10,"windowMinutes":300,"resetsAt":"2026-09-30T15:00:00Z"},
+	  "secondary":{"usedPercent":13,"windowMinutes":10080,"resetsAt":"2026-10-06T22:00:00Z"},
+	  "updatedAt":"2026-09-30T12:00:00Z"}}]`
+	entries, err := parseCodexbarUsage([]byte(raw))
+	require.NoError(t, err)
+	// Polling later must not combine older usage with newer elapsed time.
+	now := time.Date(2026, 9, 30, 12, 5, 0, 0, time.UTC)
+	u := entries[0].toProviderUsage(now)
+	require.Len(t, u.Windows, 2)
+	require.Equal(t, &Pace{Stage: "behind", Summary: "30% in reserve | Expected 40% used"}, u.Windows[0].Pace)
+	require.Equal(t, &Pace{Stage: "ahead", Summary: "5% in deficit | Expected 8% used"}, u.Windows[1].Pace)
+	require.Equal(t, u.PacePrime, u.Windows[0].Pace)
+	require.Equal(t, u.PaceSec, u.Windows[1].Pace)
+
+	blob, err := json.Marshal(u)
+	require.NoError(t, err)
+	var body struct {
+		Windows []struct {
+			Pace *Pace `json:"pace"`
+		} `json:"windows"`
+	}
+	require.NoError(t, json.Unmarshal(blob, &body))
+	require.Equal(t, u.Windows[1].Pace, body.Windows[1].Pace, "UI receives each window's pace")
+}
+
+func TestCodexPacePreservesWindowSlots(t *testing.T) {
+	const raw = `[{"provider":"codex","pace":{
+	  "primary":{"summary":"Wrong window","stage":"ahead"},
+	  "secondary":{"summary":"24% in reserve | Expected 37% used","stage":"behind"}},
+	  "usage":{"secondary":{"usedPercent":13,"windowMinutes":10080,"resetsAt":"2026-10-06T22:00:00Z"},
+	  "extraRateWindows":[{"title":"Scoped quota","window":{"usedPercent":50,"windowMinutes":300}}]}}]`
+	entries, err := parseCodexbarUsage([]byte(raw))
+	require.NoError(t, err)
+	u := entries[0].toProviderUsage(time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC))
+	require.Len(t, u.Windows, 2)
+	require.Equal(t, "weekly", u.Windows[0].Label)
+	require.Equal(t, &Pace{Stage: "behind", Summary: "24% in reserve | Expected 37% used"}, u.Windows[0].Pace,
+		"preserve reported secondary pace when the primary quota is absent")
+	require.Nil(t, u.Windows[1].Pace, "scoped extras do not inherit another window's pace")
+
+	entries[0].Pace = nil
+	u = entries[0].toProviderUsage(time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC))
+	require.Equal(t, &Pace{Stage: "ahead", Summary: "5% in deficit | Expected 8% used"}, u.Windows[0].Pace,
+		"derive weekly pace even when it is the only reported quota")
+	require.Nil(t, u.PacePrime)
+	require.Equal(t, u.Windows[0].Pace, u.PaceSec)
+}
+
+func TestCodexPaceSnakeCaseAndEmptySummary(t *testing.T) {
+	const raw = `[{"provider":"codex","pace":{"primary":{"stage":"onpace"}},"usage":{
+	  "primary":{"used_percent":40,"window_minutes":300,"resets_at":"2026-09-30T15:00:00Z"},
+	  "updated_at":"2026-09-30T12:00:00Z"}}]`
+	entries, err := parseCodexbarUsage([]byte(raw))
+	require.NoError(t, err)
+	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	u := entries[0].toProviderUsage(now)
+	require.Equal(t, &Pace{Stage: "onPace", Summary: "On pace | Expected 40% used"}, u.Windows[0].Pace)
+
+	u = entries[0].toProviderUsage(now.Add(3 * time.Hour))
+	require.Nil(t, u.Windows[0].Pace, "do not derive pace from an expired snapshot")
+
+	u = entries[0].toProviderUsage(now.Add(-time.Minute))
+	require.Nil(t, u.Windows[0].Pace, "do not derive pace from a future snapshot")
+}
+
+func TestCodexPaceForScopedQuotas(t *testing.T) {
+	const raw = `[{"provider":"codex","usage":{"extraRateWindows":[
+	  {"id":"reset-credits","window":{"usedPercent":2}},
+	  {"id":"missing","window":null},
+	  {"id":"scoped","title":"Scoped quota","window":{
+	    "usedPercent":10,"windowMinutes":300,"resetsAt":"2026-09-30T15:00:00Z"}}
+	],"updatedAt":"2026-09-30T12:00:00Z"}}]`
+	entries, err := parseCodexbarUsage([]byte(raw))
+	require.NoError(t, err)
+	u := entries[0].toProviderUsage(time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC))
+	require.Len(t, u.Windows, 1, "manual resets and absent windows stay excluded")
+	require.True(t, u.Windows[0].Scoped)
+	require.Equal(t, &Pace{Stage: "behind", Summary: "30% in reserve | Expected 40% used"}, u.Windows[0].Pace)
+}
+
+func TestCodexPaceRequiresReportedUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		usage    string
+		wantPace bool
+	}{
+		{"omitted", "", false},
+		{"null", `"usedPercent":null,`, false},
+		{"snake null", `"used_percent":null,`, false},
+		{"snake invalid", `"used_percent":"unknown",`, false},
+		{"reported zero", `"usedPercent":0,`, true},
+		{"snake reported zero", `"used_percent":0,`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := `[{"provider":"codex","usage":{"primary":{` + tc.usage +
+				`"windowMinutes":300,"resetsAt":"2026-09-30T15:00:00Z"}}}]`
+			entries, err := parseCodexbarUsage([]byte(raw))
+			require.NoError(t, err)
+			u := entries[0].toProviderUsage(time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC))
+			if tc.wantPace {
+				require.Equal(t, &Pace{Stage: "behind", Summary: "40% in reserve | Expected 40% used"}, u.Windows[0].Pace)
+			} else {
+				require.Nil(t, u.Windows[0].Pace)
+				require.Nil(t, u.PacePrime)
+			}
+		})
+	}
+}
+
+func TestFixedWindowPaceRequiresReliableInputs(t *testing.T) {
+	reset := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name   string
+		window cbWindow
+		now    time.Time
+		want   *Pace
+	}{
+		{"zero usage", cbWindow{UsedPercent: 0, WindowMinutes: 300, ResetsAt: reset.Format(time.RFC3339)}, reset.Add(-3 * time.Hour),
+			&Pace{Stage: "behind", Summary: "40% in reserve | Expected 40% used"}},
+		{"full usage", cbWindow{UsedPercent: 100, WindowMinutes: 300, ResetsAt: reset.Format(time.RFC3339)}, reset.Add(-3 * time.Hour),
+			&Pace{Stage: "ahead", Summary: "60% in deficit | Expected 40% used"}},
+		{"unknown duration", cbWindow{UsedPercent: 13, ResetsAt: reset.Format(time.RFC3339)}, reset.Add(-time.Hour), nil},
+		{"negative duration", cbWindow{UsedPercent: 13, WindowMinutes: -300, ResetsAt: reset.Format(time.RFC3339)}, reset.Add(-time.Hour), nil},
+		{"unknown reset", cbWindow{UsedPercent: 13, WindowMinutes: 300}, reset.Add(-time.Hour), nil},
+		{"invalid reset", cbWindow{UsedPercent: 13, WindowMinutes: 300, ResetsAt: "not a timestamp"}, reset.Add(-time.Hour), nil},
+		{"early window", cbWindow{UsedPercent: 13, WindowMinutes: 300, ResetsAt: reset.Format(time.RFC3339)}, reset.Add(-299 * time.Minute), nil},
+		{"before window", cbWindow{UsedPercent: 13, WindowMinutes: 300, ResetsAt: reset.Format(time.RFC3339)}, reset.Add(-6 * time.Hour), nil},
+		{"expired window", cbWindow{UsedPercent: 13, WindowMinutes: 300, ResetsAt: reset.Format(time.RFC3339)}, reset, nil},
+		{"negative usage", cbWindow{UsedPercent: -1, WindowMinutes: 300, ResetsAt: reset.Format(time.RFC3339)}, reset.Add(-time.Hour), nil},
+		{"invalid usage", cbWindow{UsedPercent: 101, WindowMinutes: 300, ResetsAt: reset.Format(time.RFC3339)}, reset.Add(-time.Hour), nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.window.usageReported = true
+			require.Equal(t, tc.want, tc.window.fixedWindowPace(tc.now))
+		})
+	}
+}
+
 func TestParseCodexbarUsage_Invalid(t *testing.T) {
 	_, err := parseCodexbarUsage([]byte("not json"))
 	require.Error(t, err)

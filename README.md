@@ -89,6 +89,14 @@ a projected month-end total:
   ("48% in reserve"). Copilot labels its primary window Premium interactions;
   when CodexBar omits pace but supplies its monthly reset, the plugin derives
   reserve or deficit against linear calendar-month consumption.
+- **Codex pace**: each quota shows "X% in reserve", "X% in deficit", or
+  "On pace". When CodexBar omits the summary, the plugin compares percentage
+  used with percentage of the reported window elapsed at the usage snapshot.
+  Reserve means usage is below that pace; deficit means it is above.
+  This is distinct from the quota remaining. The phone Status drawer shows
+  pace for its displayed quota, too. Derived pace stays hidden when the
+  usage percentage, duration, or reset is unknown, the window has expired,
+  or less than 3% has elapsed. Scoped extra quotas use their own window data.
 - **Cursor details**: Total, Auto and API usage show the percentage used, with
   bars that fill as usage increases, reset times and extra spend.
   The backend supplements CodexBar with Cursor's dashboard endpoints,
@@ -412,7 +420,7 @@ the target platform's binary; `make package-host` on Linux cannot run on a Mac.
 The equivalent HTTP install, when the instance's authentication is disabled, is:
 
 ```sh
-curl -F package=@kandev-provider-usage-0.9.3.tar.gz \
+curl -F package=@kandev-provider-usage-0.9.5.tar.gz \
   http://localhost:8080/api/plugins/install
 ```
 
@@ -428,4 +436,5 @@ patch, minor, or major bump. The workflow serializes releases and checks the
 tag, manifest, Makefile and built package versions. It runs format, vet, test
 and package checks before it commits metadata or pushes a tag. Pushed tags run
 the same checks before the workflow publishes the archive and `checksums.txt`
-as a GitHub Release, which the Kandev marketplace resolves.
+as a GitHub Release, which the Kandev marketplace resolves. The checksum file
+includes the archive's SHA-256 alongside its internal file hashes.
