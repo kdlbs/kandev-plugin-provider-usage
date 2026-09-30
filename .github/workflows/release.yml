@@ -1,8 +1,5 @@
-name: release
+name: Release
 
-# Run manually from GitHub Actions on main to calculate a version, commit the
-# release metadata and changelog, tag that commit, then build and publish it.
-# Existing v* tag pushes skip preparation and only build and publish.
 on:
   push:
     tags:
@@ -19,19 +16,25 @@ on:
           - minor
           - major
       dry_run:
-        description: "Calculate the release version without committing, tagging, or publishing"
+        description: "Calculate a version without committing, tagging, or publishing"
         required: true
         type: boolean
         default: false
 
+concurrency:
+  group: provider-usage-release
+  cancel-in-progress: false
+
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   prepare:
-    name: Prepare release commit
+    name: Validate and prepare release
     if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       tag: ${{ steps.version.outputs.tag }}
     steps:
@@ -45,34 +48,56 @@ jobs:
             exit 1
           }
 
-      - name: Check out main and release tags
-        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+      - name: Check out plugin and release tags
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
+          path: plugin
           fetch-depth: 0
 
-      - name: Compute next release version
+      - name: Read pinned Kandev source revision
+        id: sdk
+        working-directory: plugin
+        run: |
+          set -euo pipefail
+          sdk_ref="$(cat .kandev-sdk-ref)"
+          [[ "$sdk_ref" =~ ^[0-9a-f]{40}$ ]]
+          echo "ref=$sdk_ref" >> "$GITHUB_OUTPUT"
+
+      - name: Check out Kandev SDK source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: kdlbs/kandev
+          path: kandev
+          ref: ${{ steps.sdk.outputs.ref }}
+          sparse-checkout: apps/backend
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: plugin/go.mod
+          cache-dependency-path: plugin/go.sum
+
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 24
+
+      - name: Compute release version
         id: version
+        working-directory: plugin
         env:
           BUMP: ${{ inputs.bump }}
         run: |
           set -euo pipefail
           CURRENT_VERSION="$(sed -nE 's/^version: "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' manifest.yaml)"
-          MAKE_VERSION="$(sed -nE 's/^VERSION := ([0-9]+\.[0-9]+\.[0-9]+)$/\1/p' Makefile)"
-          test -n "$CURRENT_VERSION" || { echo "manifest.yaml has no SemVer version." >&2; exit 1; }
-          test "$CURRENT_VERSION" = "$MAKE_VERSION" || {
-            echo "manifest.yaml ($CURRENT_VERSION) and Makefile ($MAKE_VERSION) disagree." >&2
-            exit 1
-          }
+          sh scripts/verify-release-version.sh "v$CURRENT_VERSION"
 
           LATEST_TAG="$(git tag --list 'v*' | awk '/^v[0-9]+\.[0-9]+\.[0-9]+$/' | sort -V | tail -n 1)"
-          BASELINE="$(CURRENT_VERSION="$CURRENT_VERSION" LATEST_TAG="$LATEST_TAG" python3 - <<'PY'
-          import os
-          current = tuple(map(int, os.environ["CURRENT_VERSION"].split(".")))
-          latest = os.environ["LATEST_TAG"].removeprefix("v")
-          tagged = tuple(map(int, latest.split("."))) if latest else (0, 0, 0)
-          print(".".join(map(str, max(current, tagged))))
-          PY
-          )"
+          BASELINE="$CURRENT_VERSION"
+          if [ -n "$LATEST_TAG" ]; then
+            LATEST_VERSION="${LATEST_TAG#v}"
+            BASELINE="$(printf '%s\n%s\n' "$CURRENT_VERSION" "$LATEST_VERSION" | sort -V | tail -n 1)"
+          fi
           IFS=. read -r MAJOR MINOR PATCH <<<"$BASELINE"
           case "$BUMP" in
             patch) NEXT="$MAJOR.$MINOR.$((PATCH + 1))" ;;
@@ -82,14 +107,14 @@ jobs:
           esac
           TAG="v$NEXT"
 
-          ! git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null || {
+          if git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
             echo "Tag already exists locally: $TAG" >&2
             exit 1
-          }
-          ! git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null || {
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
             echo "Tag already exists on origin: $TAG" >&2
             exit 1
-          }
+          fi
 
           echo "Current version: $CURRENT_VERSION"
           echo "Latest release tag: ${LATEST_TAG:-none}"
@@ -100,26 +125,28 @@ jobs:
 
       - name: Report dry run
         if: ${{ inputs.dry_run }}
-        run: echo "Would commit, tag, and publish ${{ steps.version.outputs.tag }}."
+        run: echo "Would validate, commit, tag, and publish ${{ steps.version.outputs.tag }}."
 
       - name: Update release metadata and changelog
         if: ${{ !inputs.dry_run }}
+        working-directory: plugin
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          NEXT_VERSION: ${{ steps.version.outputs.version }}
           PREVIOUS_TAG: ${{ steps.version.outputs.previous_tag }}
         run: |
           set -euo pipefail
-          sed -i -E "s/^version: \"[0-9]+\.[0-9]+\.[0-9]+\"$/version: \"$VERSION\"/" manifest.yaml
-          sed -i -E "s/^VERSION := [0-9]+\.[0-9]+\.[0-9]+$/VERSION := $VERSION/" Makefile
-          sed -i -E "s/kandev-provider-usage-[0-9]+\.[0-9]+\.[0-9]+\.tar\.gz/kandev-provider-usage-$VERSION.tar.gz/" README.md
+          CURRENT_VERSION="$(sed -nE 's/^version: "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' manifest.yaml)"
+          sed -i -E "s/^version: \"[0-9]+\.[0-9]+\.[0-9]+\"$/version: \"$NEXT_VERSION\"/" manifest.yaml
+          sed -i -E "s/^VERSION := [0-9]+\.[0-9]+\.[0-9]+$/VERSION := $NEXT_VERSION/" Makefile
+          sed -i "s/kandev-provider-usage-$CURRENT_VERSION.tar.gz/kandev-provider-usage-$NEXT_VERSION.tar.gz/" README.md
 
-          RANGE="${PREVIOUS_TAG:+$PREVIOUS_TAG..}HEAD"
+          if [ -n "$PREVIOUS_TAG" ]; then RANGE="$PREVIOUS_TAG..HEAD"; else RANGE=HEAD; fi
           CHANGES="$(git log --no-merges --format='- %s (%h)' "$RANGE")"
           test -n "$CHANGES" || CHANGES="- Initial release"
           {
             echo "# Changelog"
             echo
-            printf '## [%s] - %s\n\n' "$VERSION" "$(date -u +%F)"
+            printf '## [%s] - %s\n\n' "$NEXT_VERSION" "$(date -u +%F)"
             echo "### Changed"
             echo
             printf '%s\n' "$CHANGES"
@@ -128,23 +155,42 @@ jobs:
           } > CHANGELOG.md.next
           mv CHANGELOG.md.next CHANGELOG.md
 
-      - name: Commit and tag release metadata
+      - name: Validate release identity and package
         if: ${{ !inputs.dry_run }}
+        working-directory: plugin
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          sh scripts/verify-release-version.sh "$TAG"
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+          make check-format
+          make vet
+          make test
+          make verify-package
+          PACKAGE_FILE="$(make --no-print-directory -s package-file)"
+          sh scripts/verify-release-version.sh "$TAG" "$PACKAGE_FILE"
+
+      - name: Commit and tag validated release metadata
+        if: ${{ !inputs.dry_run }}
+        working-directory: plugin
         env:
           VERSION: ${{ steps.version.outputs.version }}
           TAG: ${{ steps.version.outputs.tag }}
         run: |
           set -euo pipefail
+          git diff --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add manifest.yaml Makefile README.md CHANGELOG.md
           git commit -m "release: $VERSION"
-          git push origin HEAD:main
           git tag -a "$TAG" -m "Release $VERSION"
+          git push origin HEAD:main
           git push origin "$TAG"
 
   publish:
-    name: Build and publish release
+    name: Verify package and publish release
     needs: prepare
     if: >-
       ${{
@@ -153,48 +199,76 @@ jobs:
         (github.event_name == 'workflow_dispatch' && !inputs.dry_run && needs.prepare.result == 'success'))
       }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - name: Checkout plugin
-        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+      - name: Check out release commit
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           path: plugin
           ref: ${{ github.event_name == 'push' && github.ref || needs.prepare.outputs.tag }}
 
-      - name: Checkout kandev SDK
-        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+      - name: Read pinned Kandev source revision
+        id: sdk
+        working-directory: plugin
+        run: |
+          set -euo pipefail
+          sdk_ref="$(cat .kandev-sdk-ref)"
+          [[ "$sdk_ref" =~ ^[0-9a-f]{40}$ ]]
+          echo "ref=$sdk_ref" >> "$GITHUB_OUTPUT"
+
+      - name: Check out Kandev SDK source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           repository: kdlbs/kandev
           path: kandev
+          ref: ${{ steps.sdk.outputs.ref }}
           sparse-checkout: apps/backend
 
-      - name: Setup Go
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: plugin/go.mod
           cache-dependency-path: plugin/go.sum
 
-      - name: Verify
-        working-directory: plugin
-        run: |
-          test -z "$(gofmt -l ./server)" || { echo "gofmt needed:"; gofmt -l ./server; exit 1; }
-          go vet ./server/...
-          make test
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 24
 
-      - name: Package all platforms
+      - name: Verify release identity and build package
+        id: verify
         working-directory: plugin
-        run: make package
+        env:
+          TAG: ${{ github.event_name == 'push' && github.ref_name || needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          sh scripts/verify-release-version.sh "$TAG"
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+          make check-format
+          make vet
+          make test
+          make verify-package
+          PACKAGE_FILE="$(make --no-print-directory -s package-file)"
+          sh scripts/verify-release-version.sh "$TAG" "$PACKAGE_FILE"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "package=$PACKAGE_FILE" >> "$GITHUB_OUTPUT"
 
       - name: Generate release checksums
         working-directory: plugin
+        env:
+          PACKAGE_FILE: ${{ steps.verify.outputs.package }}
         run: |
-          tar -xzf kandev-provider-usage-*.tar.gz checksums.txt
-          sha256sum kandev-provider-usage-*.tar.gz >> checksums.txt
+          set -euo pipefail
+          tar -xOzf "$PACKAGE_FILE" checksums.txt > checksums.txt
+          sha256sum "$PACKAGE_FILE" >> checksums.txt
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
-          tag_name: ${{ github.event_name == 'push' && github.ref_name || needs.prepare.outputs.tag }}
+          tag_name: ${{ steps.verify.outputs.tag }}
           files: |
-            plugin/kandev-provider-usage-*.tar.gz
+            plugin/${{ steps.verify.outputs.package }}
             plugin/checksums.txt
           generate_release_notes: true

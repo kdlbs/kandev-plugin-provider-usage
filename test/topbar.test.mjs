@@ -5,10 +5,13 @@ import vm from "node:vm";
 
 // Exercise the registered component with deterministic hooks, requests and timers.
 // No provider CLI, browser storage, or real clock is used.
-function mount(slot = "main-top-bar", slotProps, saved = "") {
+function mount(slot = "main-top-bar", slotProps, saved = "", options = {}) {
   const hooks = [], pending = [], intervals = new Map(), timeouts = new Map();
   const registrations = new Map();
   let definition, cursor = 0, timerID = 0, writes = 0;
+  let now = options.now ?? Date.now();
+  const deadlines = new Map();
+  function HostAction() {}
   const React = {
     useState(initial) {
       const i = cursor++;
@@ -29,22 +32,54 @@ function mount(slot = "main-top-bar", slotProps, saved = "") {
     },
   };
   const requests = [];
+  const ui = { Button: "button", Card: "article" };
+  if (options.actionsSupported !== false) ui.Action = HostAction;
+  const translationCalls = [];
+  const translationCatalogs = {};
   const host = {
-    React, jsx: (type, props, ...children) => ({ type, props: props || {}, children }),
-    ui: { Button: "button", Card: "article" },
+    React,
+    jsx: (type, props, ...children) => ({
+      type,
+      props: props || {},
+      children: type === HostAction ? [props?.text] : children,
+    }),
+    ui,
     api: { fetch(url, init) { return new Promise((resolve, reject) => requests.push({ url, init, resolve: (data, ok = true) => resolve({ ok, json: () => Promise.resolve(data) }), reject })); } },
   };
+  if (options.i18nLocale) {
+    host.i18n = {
+      useTranslation() {
+        return {
+          t(key, args) {
+            translationCalls.push({ key, defaultValue: args?.defaultValue });
+            return translationCatalogs[options.i18nLocale]?.[key]
+              || translationCatalogs.en?.[key]
+              || args?.defaultValue
+              || key;
+          },
+        };
+      },
+    };
+  }
   const source = readFileSync(new URL("../ui/bundle.js", import.meta.url), "utf8");
   vm.runInNewContext(source + (slot === "cursor-team-settings" ? "\nwindow.registerTestComponent(makeCursorTeamSettings);" : ""), {
     fetch: host.api.fetch,
     AbortController,
+    Date: class extends Date { static now() { return now; } },
     window: { registerKandevPlugin(_id, plugin) { definition = plugin; },
       registerTestComponent(factory) { registrations.set(slot, factory(host)); },
       localStorage: { getItem: () => saved, setItem: (_key, value) => { saved = value; } }, innerWidth: 390, innerHeight: 844 },
     setInterval: fn => { intervals.set(++timerID, fn); return timerID; }, clearInterval: id => intervals.delete(id),
-    setTimeout: fn => { timeouts.set(++timerID, fn); return timerID; }, clearTimeout: id => timeouts.delete(id),
+    setTimeout: (fn, delay) => { timeouts.set(++timerID, fn); deadlines.set(timerID, now + delay); return timerID; },
+    clearTimeout: id => { timeouts.delete(id); deadlines.delete(id); },
   });
-  definition.initialize({ registerComponent: (name, component) => registrations.set(name, component) }, host);
+  const registry = {
+    registerComponent: (name, component) => registrations.set(name, component),
+  };
+  if (options.translationRegistrationSupported !== false) {
+    registry.registerTranslations = catalogs => Object.assign(translationCatalogs, catalogs);
+  }
+  definition.initialize(registry, host);
   assert.ok(registrations.has(slot), `${slot} is registered`);
   function render(nextProps = slotProps) {
     slotProps = nextProps;
@@ -55,6 +90,18 @@ function mount(slot = "main-top-bar", slotProps, saved = "") {
     return tree;
   }
   return { render, requests, intervals, timeouts, registrations,
+    advanceTo(at) {
+      now = at;
+      for (const [id, deadline] of deadlines) {
+        if (deadline > now) continue;
+        const fn = timeouts.get(id);
+        timeouts.delete(id); deadlines.delete(id);
+        fn?.();
+      }
+    },
+    Action: ui.Action,
+    translationCalls,
+    translationCatalogs,
     get saved() { return saved; }, get writes() { return writes; },
     unmount() { hooks.forEach(hook => hook?.cleanup?.()); },
   };
@@ -74,7 +121,7 @@ const snapshot = { current_provider: "", pill_providers: [], providers: [
   { provider: "codex", windows: [{ utilization_pct: 61 }] },
 ] };
 const flush = () => new Promise(resolve => setImmediate(resolve));
-const trigger = tree => nodes(tree, n => n.props["aria-label"] === "Provider usage")[0];
+const trigger = tree => nodes(tree, n => n.props.id === "provider-usage-topbar")[0];
 
 async function loadSettings(app, data, config = {}) {
   app.render();
@@ -405,6 +452,146 @@ for (const slotProps of [undefined, { workspaceId: "workspace", currentPage: "ka
   });
 }
 
+test("both topbar slots use one host Action and retain the disclosure trigger", async () => {
+  for (const [slot, slotProps] of [
+    ["main-top-bar", { currentPage: "kanban", presentation: "desktop" }],
+    ["chat-top-bar", { taskId: "task/1", activeSessionId: "session/1", presentation: "desktop" }],
+  ]) {
+    const app = mount(slot, slotProps, "codex");
+    let tree = app.render();
+    let action = trigger(tree);
+    assert.equal(action.type, app.Action);
+    assert.equal(action.props.label, "Provider usage");
+    assert.equal(action.props.tooltip, "", "the rich disclosure replaces the host's default label tooltip");
+    assert.equal(action.props.text, undefined, "loading keeps the action icon-only");
+    assert.equal(action.props["aria-expanded"], false);
+    assert.equal(typeof action.props.onClick, "function");
+    assert.equal(typeof action.props.onFocus, "function");
+    assert.equal(action.props.icon.props["aria-hidden"], "true", "the host supplies the accessible action name");
+    for (const prop of ["className", "style", "size", "variant", "asChild"]) {
+      assert.equal(Object.hasOwn(action.props, prop), false, `${prop} is host-owned`);
+    }
+    assert.equal(nodes(tree, n => n.props.id === "provider-usage-topbar").length, 1);
+
+    app.requests[0].resolve({ ...snapshot, current_provider: "codex" }); await flush();
+    tree = app.render();
+    action = trigger(tree);
+    assert.equal(action.props.text, "61%");
+    assert.equal(action.props.label, "Provider usage", "the accessible name stays stable as the value changes");
+
+    action.props.onFocus();
+    tree = app.render();
+    assert.equal(trigger(tree).props["aria-expanded"], true);
+    assert.match(text(tree), /61%/);
+    assert.equal(nodes(tree, n => n.props["data-provider-usage-panel"] === "true").length, 1);
+    trigger(tree).props.onClick();
+    assert.equal(trigger(app.render()).props["aria-expanded"], false);
+    app.unmount();
+  }
+});
+
+test("topbar Action stays an icon while loading, with no providers, and after an error", async () => {
+  const app = mount("main-top-bar", { presentation: "mobile" });
+  let tree = app.render();
+  let action = trigger(tree);
+  assert.equal(action.type, app.Action);
+  assert.equal(action.props.text, undefined);
+  assert.equal(action.props.onFocus, undefined, "phone activation remains tap-driven");
+  app.requests[0].resolve({ providers: [], current_provider: "", pill_providers: [] }); await flush();
+  tree = app.render();
+  action = trigger(tree);
+  assert.equal(action.props.text, undefined);
+  action.props.onClick();
+  tree = app.render();
+  assert.equal(trigger(tree).props["aria-expanded"], true);
+  assert.match(text(tree), /No provider usage yet/);
+  app.unmount();
+
+  const failed = mount("chat-top-bar", { taskId: "task/2", activeSessionId: "session/2" });
+  failed.render();
+  failed.requests[0].reject(new Error("offline")); await flush();
+  action = trigger(failed.render());
+  assert.equal(action.type, failed.Action);
+  assert.equal(action.props.text, undefined);
+  assert.equal(action.props.label, "Provider usage");
+  failed.unmount();
+});
+
+test("provider usage English and pt-PT labels are registered and looked up by i18n", () => {
+  const localized = mount("main-top-bar", { presentation: "desktop" }, "", {
+    i18nLocale: "pt-pt",
+  });
+  assert.equal(localized.translationCatalogs.en.providerUsage, "Provider usage");
+  assert.equal(localized.translationCatalogs["pt-pt"].providerUsage, "Utilização do fornecedor");
+  const action = trigger(localized.render());
+  assert.equal(action.props.label, "Utilização do fornecedor");
+  assert.equal(action.props.tooltip, "");
+  assert.equal(localized.translationCalls.length, 1);
+  assert.equal(localized.translationCalls[0].key, "providerUsage");
+  assert.equal(localized.translationCalls[0].defaultValue, "Provider usage");
+  localized.unmount();
+
+  const english = mount("main-top-bar", { presentation: "desktop" }, "", { i18nLocale: "en" });
+  assert.equal(trigger(english.render()).props.label, "Provider usage");
+  english.unmount();
+
+  const withoutI18n = mount("main-top-bar", { presentation: "desktop" });
+  assert.equal(trigger(withoutI18n.render()).props.label, "Provider usage");
+  assert.equal(withoutI18n.translationCalls.length, 0);
+  withoutI18n.unmount();
+});
+
+test("older registries without translation support keep the English label fallback", () => {
+  const app = mount("main-top-bar", { presentation: "desktop" }, "", {
+    actionsSupported: false,
+    i18nLocale: "pt-pt",
+    translationRegistrationSupported: false,
+  });
+  const triggerNode = trigger(app.render());
+  assert.equal(triggerNode.props["aria-label"], "Provider usage");
+  assert.equal(app.translationCatalogs.en, undefined);
+  assert.equal(app.translationCalls[0].key, "providerUsage");
+  app.unmount();
+});
+
+test("topbar Action sends long metric text to the host without adding fixed geometry", async () => {
+  const app = mount("main-top-bar", { presentation: "desktop" });
+  app.render();
+  app.requests[0].resolve({ current_provider: "codex", providers: [
+    { provider: "codex", windows: [{ utilization_pct: 123456.78 }] },
+  ] }); await flush();
+  const action = trigger(app.render());
+  assert.equal(action.type, app.Action);
+  assert.equal(action.props.text, "123457%");
+  assert.equal(action.props.label, "Provider usage");
+  assert.equal(Object.hasOwn(action.props, "style"), false);
+  assert.equal(Object.hasOwn(action.props, "className"), false);
+  app.unmount();
+});
+
+test("an older host selects the original Button once and keeps the rich provider pill", async () => {
+  const app = mount("main-top-bar", { presentation: "desktop" }, "codex", {
+    actionsSupported: false,
+    i18nLocale: "pt-pt",
+  });
+  app.render();
+  app.requests[0].resolve({ ...snapshot, current_provider: "codex" }); await flush();
+  const tree = app.render();
+  const fallback = trigger(tree);
+  assert.equal(fallback.type, "button");
+  assert.equal(fallback.props["data-provider-usage-legacy"], "true");
+  assert.equal(fallback.props["aria-label"], "Utilização do fornecedor");
+  assert.match(fallback.props.className, /h-6 gap-1\.5 px-2/);
+  assert.match(text(fallback), /61%/);
+  assert.equal(nodes(tree, n => n.props.id === "provider-usage-topbar").length, 1);
+  assert.equal(nodes(tree, n => n.props["data-provider-usage-legacy"] === "true").length, 1);
+  app.unmount();
+
+  const withoutI18n = mount("main-top-bar", { presentation: "desktop" }, "", { actionsSupported: false });
+  assert.equal(trigger(withoutI18n.render()).props["aria-label"], "Provider usage");
+  withoutI18n.unmount();
+});
+
 test("unscoped fallback, empty, error and silent poll recovery", async () => {
   const app = mount("main-top-bar", {}, "missing");
   app.render(); app.requests[0].resolve(snapshot); await flush();
@@ -626,3 +813,47 @@ for (const fails of [false, true]) {
     assert.equal(app.requests.length, requests, "no providers request after unmount");
   });
 }
+
+
+for (const [slot, props] of [
+  ["main-top-bar", {}],
+  ["chat-top-bar", {}],
+  ["app-status-bar-right", { presentation: "mobile-drawer" }],
+  ["plugin-settings", {}],
+]) {
+  test(`${slot} expires daily spend at UTC midnight without a network update`, async () => {
+    const midnight = Date.parse("2026-09-30T00:00:00Z");
+    const app = mount(slot, props, "cursor", { now: midnight - 1000 });
+    const data = { ...snapshot, status_bar_mode: "both", pill_providers: ["cursor"], providers: [{
+      provider: "cursor", windows: [{ label: "Total Usage", utilization_pct: 25 }],
+      daily_usage: { used: 12.34, currency: "USD", start_at: "2026-09-29T00:00:00Z", end_at: "2026-09-30T00:00:00Z" },
+    }] };
+    let tree;
+    if (slot === "plugin-settings") tree = await loadSettings(app, data);
+    else {
+      app.render(); app.requests[0].resolve(data); await flush(); tree = app.render();
+      if (slot !== "app-status-bar-right") { trigger(tree).props.onFocus(); tree = app.render(); }
+    }
+    assert.match(text(tree), /Daily Usage.*12\.34 spent/);
+    const requests = app.requests.length;
+    const writes = app.writes;
+    app.advanceTo(midnight - 1);
+    assert.equal(app.writes, writes, "no premature update");
+    app.advanceTo(midnight);
+    assert.ok(app.writes > writes, "day boundary triggers a render without a poll");
+    assert.match(text(app.render()), /Daily UsageNot reported/);
+    assert.equal(app.requests.length, requests, "expiry is local, not a provider fetch");
+    app.unmount();
+  });
+}
+
+test("daily spend expiry timer is cancelled on unmount", async () => {
+  const app = mount("plugin-settings", {}, "", { now: Date.parse("2026-09-29T23:59:59Z") });
+  await loadSettings(app, { providers: [{ provider: "cursor", windows: [], daily_usage: { used: 1, currency: "USD", start_at: "2026-09-29T00:00:00Z", end_at: "2026-09-30T00:00:00Z" } }] });
+  assert.equal(app.timeouts.size, 1);
+  app.unmount();
+  assert.equal(app.timeouts.size, 0);
+  const writes = app.writes;
+  app.advanceTo(Date.parse("2026-09-30T00:00:00Z"));
+  assert.equal(app.writes, writes);
+});

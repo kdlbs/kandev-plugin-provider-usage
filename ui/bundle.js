@@ -23,15 +23,19 @@
 var AUTO_REFRESH_MS = 60 * 1000;
 var DISCOVERY_RETRY_MS = 2 * 1000;
 var TOPBAR_STYLE_ID = "kandev-provider-usage-topbar-style";
+var TRANSLATIONS = {
+  en: { providerUsage: "Provider usage" },
+  "pt-pt": { providerUsage: "Utilização do fornecedor" },
+};
 var TOPBAR_CSS =
-  "#provider-usage-topbar{height:28px;min-height:28px}" +
-  "#provider-usage-topbar[data-provider-usage-mode=icon]{width:28px}" +
-  "@media (max-width:639px){#provider-usage-topbar{height:44px;min-height:44px}" +
-  "#provider-usage-topbar[data-provider-usage-mode=icon]{width:44px}}" +
-  ".provider-usage-menu button{min-height:44px!important;min-width:44px!important}" +
+  "#provider-usage-topbar[data-provider-usage-legacy=true]{height:28px;min-height:28px}" +
+  "#provider-usage-topbar[data-provider-usage-legacy=true][data-provider-usage-mode=icon]{width:28px}" +
+  "@media (max-width:639px){#provider-usage-topbar[data-provider-usage-legacy=true]{height:44px;min-height:44px}" +
+  "#provider-usage-topbar[data-provider-usage-legacy=true][data-provider-usage-mode=icon]{width:44px}}" +
+  ".provider-usage-menu [data-provider-usage-panel] button{min-height:44px!important;min-width:44px!important}" +
   // Match the host utility layer so its important square-button rules can be overridden.
-  "@layer utilities{.provider-usage-menu #provider-usage-topbar{width:auto!important;padding:0 8px!important;align-self:flex-start}" +
-  ".provider-usage-menu #provider-usage-topbar[data-provider-usage-mode=pill]{min-width:72px!important}}";
+  "@layer utilities{.provider-usage-menu #provider-usage-topbar[data-provider-usage-legacy=true]{width:auto!important;padding:0 8px!important;align-self:flex-start}" +
+  ".provider-usage-menu #provider-usage-topbar[data-provider-usage-legacy=true][data-provider-usage-mode=pill]{min-width:72px!important}}";
 var RESET_CREDITS_CSS =
   ".provider-reset-credits summary{list-style:none;cursor:pointer;border-radius:4px}" +
   ".provider-reset-credits summary::-webkit-details-marker{display:none}" +
@@ -344,8 +348,29 @@ function spendAmount(amount, currency) {
   catch (_err) { return amount.toFixed(2) + " " + currency; }
 }
 
+// Expire an open daily-spend view at its day boundary without waiting for a
+// network poll. All usage surfaces share this hook and clean up on unmount.
+function useDailyUsageExpiry(React, report) {
+  var tick = React.useState(0);
+  React.useEffect(function () {
+    var now = Date.now();
+    var expiresAt = Infinity;
+    ((report && report.providers) || []).forEach(function (provider) {
+      var daily = provider.daily_usage;
+      if (provider.provider !== "cursor" || !daily) return;
+      var end = Date.parse(daily.end_at);
+      if (Date.parse(daily.start_at) <= now && end > now) expiresAt = Math.min(expiresAt, end);
+    });
+    if (!isFinite(expiresAt)) return;
+    var timer = setTimeout(function () { tick[1](function (value) { return value + 1; }); }, expiresAt - now);
+    return function () { clearTimeout(timer); };
+  }, [report]);
+}
+
 function cursorExtrasPanel(h, p) {
   if (p.provider !== "cursor") return null;
+  var daily = p.daily_usage;
+  if (daily && !(Date.parse(daily.start_at) <= Date.now() && Date.now() < Date.parse(daily.end_at))) daily = null;
   var spend = p.extra_usage;
   var spendLabel = spend && spend.label
     ? spend.label
@@ -358,6 +383,13 @@ function cursorExtrasPanel(h, p) {
       ),
       spend && typeof spend.limit === "number" && spend.limit > 0
         ? h("span", { style: { color: "var(--muted-foreground)" } }, "Limit " + spendAmount(spend.limit, spend.currency) + (spend.scope === "team" ? " · shared across the team" : "")) : null,
+    ),
+    h("div", { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+      h("div", { style: { display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "baseline" } },
+        h("span", { style: { fontSize: "12px", fontWeight: 600 } }, "Daily Usage"),
+        h("span", { style: { color: "var(--muted-foreground)", textAlign: "right" } }, daily ? spendAmount(daily.used, daily.currency) + " spent" : "Not reported"),
+      ),
+      h("span", { style: { color: "var(--muted-foreground)" } }, "Today · UTC"),
     ),
     p.detail_warning ? h("p", { style: { margin: 0, fontSize: "10.5px", lineHeight: 1.5, color: "var(--muted-foreground)" } }, p.detail_warning) : null,
   );
@@ -751,6 +783,7 @@ function makeTopBarStatus(host) {
     var stateHook = React.useState({ loading: false, data: null, error: null });
     var state = stateHook[0];
     var setState = stateHook[1];
+    useDailyUsageExpiry(React, state.data);
     var selectedProviderHook = React.useState(function () { return readTopBarProviderPreference(); });
     var selectedProvider = selectedProviderHook[0];
     var setSelectedProvider = selectedProviderHook[1];
@@ -838,6 +871,51 @@ function makeTopBarStatus(host) {
     var d = state.data;
     var selected = topBarSelectedProvider(d && d.providers, d && d.current_provider, selectedProvider);
     var pill = pillContent(host, d, selected && selected.provider);
+    var actionIcon = selected
+      ? providerIcon(h, selected.provider, 14)
+      : gaugeIcon(h, 14);
+    var actionText = selected
+      ? ((selected.windows || []).length ? fmtPct(peakPct(selected)) : "—")
+      : undefined;
+    var actionLabel = "Provider usage";
+    if (host.i18n && typeof host.i18n.useTranslation === "function") {
+      var translation = host.i18n.useTranslation();
+      if (translation && typeof translation.t === "function") {
+        actionLabel = translation.t("providerUsage", { defaultValue: actionLabel });
+      }
+    }
+    var trigger;
+
+    if (typeof ui.Action === "function") {
+      trigger = h(ui.Action, {
+        id: "provider-usage-topbar",
+        label: actionLabel,
+        icon: actionIcon,
+        text: actionText,
+        tooltip: "",
+        "aria-expanded": open,
+        onFocus: mobileMenu ? undefined : openNow,
+        onClick: function () { if (open) { setOpen(false); } else { openNow(); } },
+      });
+    } else {
+      trigger = h(
+        ui.Button,
+        {
+          id: "provider-usage-topbar",
+          "data-provider-usage-legacy": "true",
+          "data-provider-usage-mode": pill ? "pill" : "icon",
+          type: "button",
+          variant: "outline",
+          size: "sm",
+          className: (pill ? "h-6 gap-1.5 px-2 " : "h-6 w-6 px-0 ") + "rounded-md text-xs font-medium text-muted-foreground hover:text-foreground",
+          "aria-label": actionLabel,
+          "aria-expanded": open,
+          onFocus: mobileMenu ? undefined : openNow,
+          onClick: function () { if (open) { setOpen(false); } else { openNow(); } },
+        },
+        pill || gaugeIcon(h, 14),
+      );
+    }
 
     return h(
       "div",
@@ -848,26 +926,12 @@ function makeTopBarStatus(host) {
         onMouseEnter: mobileMenu ? undefined : openNow,
         onMouseLeave: mobileMenu ? undefined : scheduleClose,
       },
-      h(
-        ui.Button,
-        {
-          id: "provider-usage-topbar",
-          type: "button",
-          "data-provider-usage-mode": pill ? "pill" : "icon",
-          variant: "outline",
-          size: "sm",
-          className: (pill ? "h-6 gap-1.5 px-2 " : "h-6 w-6 px-0 ") + "rounded-md text-xs font-medium text-muted-foreground hover:text-foreground",
-          "aria-label": "Provider usage",
-          "aria-expanded": open,
-          onFocus: mobileMenu ? undefined : openNow,
-          onClick: function () { if (open) { setOpen(false); } else { openNow(); } },
-        },
-        pill || gaugeIcon(h, 14),
-      ),
+      trigger,
       open
         ? h(
             "div",
             {
+              "data-provider-usage-panel": "true",
               onMouseEnter: mobileMenu ? undefined : cancelClose,
               onMouseLeave: mobileMenu ? undefined : scheduleClose,
               // Stay inside the mobile menu's scroll/focus containment; its drawer is transformed.
@@ -1124,6 +1188,7 @@ function makeAppStatusBarUsage(host) {
     var stateHook = React.useState({ loading: true, data: null, error: null });
     var state = stateHook[0];
     var setState = stateHook[1];
+    useDailyUsageExpiry(React, state.data);
     var indexHook = React.useState(0);
     var index = indexHook[0];
     var setIndex = indexHook[1];
@@ -1898,6 +1963,7 @@ function makeSettingsStatus(host) {
     var stateHook = React.useState({ loading: true, data: null, error: null });
     var state = stateHook[0];
     var setState = stateHook[1];
+    useDailyUsageExpiry(React, state.data);
     var updateHook = React.useState({ loading: false, error: null, message: null });
     var updateState = updateHook[0], setUpdateState = updateHook[1];
     var updating = React.useRef(false);
@@ -2150,6 +2216,9 @@ function makeSettingsStatus(host) {
 // ==========================================================================
 window.registerKandevPlugin("kandev-provider-usage", {
   initialize: function (registry, host) {
+    if (registry && typeof registry.registerTranslations === "function") {
+      registry.registerTranslations(TRANSLATIONS);
+    }
     injectTopbarStyles();
     registry.registerComponent("main-top-bar", makeTopBarStatus(host));
     registry.registerComponent("chat-top-bar", makeTopBarStatus(host));

@@ -58,6 +58,7 @@ type ProviderUsage struct {
 	PacePrime     *Pace         `json:"pace_primary,omitempty"`
 	PaceSec       *Pace         `json:"pace_secondary,omitempty"`
 	ResetCredits  *ResetCredits `json:"reset_credits,omitempty"`
+	DailyUsage    *DailyUsage   `json:"daily_usage,omitempty"`
 	ExtraUsage    *UsageSpend   `json:"extra_usage,omitempty"`
 	DetailWarning string        `json:"detail_warning,omitempty"`
 	// Used only to verify that optional Cursor details belong to this account.

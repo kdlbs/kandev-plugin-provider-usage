@@ -1,0 +1,15 @@
+[
+  {
+    "provider": "codex",
+    "source": "codexbar",
+    "version": "0.45.2",
+    "usage": {
+      "primary": {
+        "usedPercent": 1234567890.1,
+        "windowMinutes": 300,
+        "resetDescription": "test reset in two hours"
+      },
+      "identity": { "planName": "Disposable smoke fixture" }
+    }
+  }
+]

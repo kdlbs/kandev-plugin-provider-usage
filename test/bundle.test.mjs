@@ -153,14 +153,17 @@ test("registers provider usage in the global status bar right slot only", () => 
   assert.ok(!slots.includes("app-status-bar-left"));
 });
 
-test("chat topbar control uses desktop and phone geometry", () => {
+test("only the legacy chat topbar button keeps plugin-owned dimensions", () => {
   const styles = topbarStyleText();
 
-  assert.match(styles, /#provider-usage-topbar[^}]*height:28px/);
+  assert.match(styles, /#provider-usage-topbar\[data-provider-usage-legacy=true\][^}]*height:28px/);
   assert.match(
     styles,
-    /@media \(max-width:639px\)\{#provider-usage-topbar[^}]*height:44px/,
+    /@media \(max-width:639px\)\{#provider-usage-topbar\[data-provider-usage-legacy=true\][^}]*height:44px/,
   );
+  assert.match(styles, /\.provider-usage-menu \[data-provider-usage-panel\] button\{min-height:44px!important/);
+  assert.doesNotMatch(styles, /\.provider-usage-menu button\{/);
+  assert.doesNotMatch(styles, /#provider-usage-topbar\{height:/, "the host Action path has no copied dimensions");
 });
 
 function element(type, props, ...children) {
@@ -707,6 +710,26 @@ test("repeated initialize/destroy removes shared styles without duplicating them
   }
 });
 
-test("mobile menu pill reserves room for icon and percentage despite host square-button sizing", () => {
-  assert.match(topbarStyleText(), /\.provider-usage-menu #provider-usage-topbar\[data-provider-usage-mode=pill\]\{min-width:72px!important\}/);
+test("mobile menu pill reserves room only on the legacy host Button", () => {
+  assert.match(topbarStyleText(), /\.provider-usage-menu #provider-usage-topbar\[data-provider-usage-legacy=true\]\[data-provider-usage-mode=pill\]\{min-width:72px!important\}/);
+});
+
+test("Cursor Daily Usage shows today's dollars in desktop and phone details", () => {
+  const { providerPanel, statusMeterDrawerRow, statusMeterDetail } = statusMeterHelpers(cursorDetailNow);
+  for (const amount of [12.34, 0, null]) {
+    const usage = cursorDetailFixture();
+    if (amount !== null) usage.daily_usage = { used: amount, currency: "USD", start_at: "2026-09-10T00:00:00Z", end_at: "2026-09-11T00:00:00Z" };
+    for (const tree of [providerPanel({ jsx: element }, usage, 75, 90, "", () => {}, false), statusMeterDrawerRow({ jsx: element }, usage, 75, 90)]) {
+      assert.match(renderedText(tree), amount === null ? /Daily UsageNot reported/ : new RegExp("Daily Usage\\$" + amount.toFixed(2).replace(".", "\\.") + " spentToday · UTC"));
+    }
+    assert.equal(statusMeterDetail(usage).pct, 27);
+  }
+});
+
+test("Cursor daily spend from yesterday is not presented as today's spend", () => {
+  const { providerPanel } = statusMeterHelpers(cursorDetailNow);
+  const usage = { ...cursorDetailFixture(), daily_usage: { used: 12.34, currency: "USD", start_at: "2026-09-09T00:00:00Z", end_at: "2026-09-10T00:00:00Z" } };
+  const text = renderedText(providerPanel({ jsx: element }, usage, 75, 90, "", () => {}, false));
+  assert.match(text, /Daily UsageNot reported/);
+  assert.doesNotMatch(text, /\$12\.34/);
 });
