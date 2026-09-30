@@ -393,3 +393,5 @@ patch, minor, or major bump. It commits the version update and generated
 `CHANGELOG.md` directly to `main`, tags that commit as `vX.Y.Z`, then verifies
 (`fmt`/`vet`/`test`), cross-compiles all platforms, and publishes the tarball +
 `checksums.txt` as a GitHub Release, which the kandev marketplace resolves.
+The release checksum file includes the tarball's SHA-256 for marketplace
+verification, alongside the archive's internal file hashes.
