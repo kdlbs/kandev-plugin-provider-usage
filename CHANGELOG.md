@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.4] - 2026-09-30
+
+### Changed
+
+- Show Codex reserve and deficit percentages (#32) (574e3f8)
+
+
 ## [0.9.3] - 2026-09-17
 
 ### Changed
