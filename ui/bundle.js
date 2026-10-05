@@ -23,15 +23,31 @@
 var AUTO_REFRESH_MS = 60 * 1000;
 var DISCOVERY_RETRY_MS = 2 * 1000;
 var TOPBAR_STYLE_ID = "kandev-provider-usage-topbar-style";
+var TRANSLATIONS = {
+  en: {
+    providerUsage: "Provider usage",
+    cursorDailyUsage: "Daily Usage",
+    cursorDailySpendSuffix: "spent",
+    cursorDailyNotReported: "Not reported",
+    cursorDailyTodayUtc: "Today · UTC",
+  },
+  "pt-pt": {
+    providerUsage: "Utilização do fornecedor",
+    cursorDailyUsage: "Utilização diária",
+    cursorDailySpendSuffix: "gastos",
+    cursorDailyNotReported: "Não reportado",
+    cursorDailyTodayUtc: "Hoje · UTC",
+  },
+};
 var TOPBAR_CSS =
-  "#provider-usage-topbar{height:28px;min-height:28px}" +
-  "#provider-usage-topbar[data-provider-usage-mode=icon]{width:28px}" +
-  "@media (max-width:639px){#provider-usage-topbar{height:44px;min-height:44px}" +
-  "#provider-usage-topbar[data-provider-usage-mode=icon]{width:44px}}" +
-  ".provider-usage-menu button{min-height:44px!important;min-width:44px!important}" +
+  "#provider-usage-topbar[data-provider-usage-legacy=true]{height:28px;min-height:28px}" +
+  "#provider-usage-topbar[data-provider-usage-legacy=true][data-provider-usage-mode=icon]{width:28px}" +
+  "@media (max-width:639px){#provider-usage-topbar[data-provider-usage-legacy=true]{height:44px;min-height:44px}" +
+  "#provider-usage-topbar[data-provider-usage-legacy=true][data-provider-usage-mode=icon]{width:44px}}" +
+  ".provider-usage-menu [data-provider-usage-panel] button{min-height:44px!important;min-width:44px!important}" +
   // Match the host utility layer so its important square-button rules can be overridden.
-  "@layer utilities{.provider-usage-menu #provider-usage-topbar{width:auto!important;padding:0 8px!important;align-self:flex-start}" +
-  ".provider-usage-menu #provider-usage-topbar[data-provider-usage-mode=pill]{min-width:72px!important}}";
+  "@layer utilities{.provider-usage-menu #provider-usage-topbar[data-provider-usage-legacy=true]{width:auto!important;padding:0 8px!important;align-self:flex-start}" +
+  ".provider-usage-menu #provider-usage-topbar[data-provider-usage-legacy=true][data-provider-usage-mode=pill]{min-width:72px!important}}";
 var RESET_CREDITS_CSS =
   ".provider-reset-credits summary{list-style:none;cursor:pointer;border-radius:4px}" +
   ".provider-reset-credits summary::-webkit-details-marker{display:none}" +
@@ -47,6 +63,17 @@ function injectTopbarStyles() {
   style.id = TOPBAR_STYLE_ID;
   style.textContent = TOPBAR_CSS + RESET_CREDITS_CSS;
   document.head.appendChild(style);
+}
+
+function usePluginTranslation(host) {
+  if (!host.i18n || typeof host.i18n.useTranslation !== "function") return null;
+  return host.i18n.useTranslation();
+}
+
+function translatedText(translation, key, fallback) {
+  if (!translation || typeof translation.t !== "function") return fallback;
+  var value = translation.t(key, { defaultValue: fallback });
+  return typeof value === "string" && value ? value : fallback;
 }
 
 function removeTopbarStyles() {
@@ -344,8 +371,29 @@ function spendAmount(amount, currency) {
   catch (_err) { return amount.toFixed(2) + " " + currency; }
 }
 
-function cursorExtrasPanel(h, p) {
+// Expire an open daily-spend view at its day boundary without waiting for a
+// network poll. All usage surfaces share this hook and clean up on unmount.
+function useDailyUsageExpiry(React, report) {
+  var tick = React.useState(0);
+  React.useEffect(function () {
+    var now = Date.now();
+    var expiresAt = Infinity;
+    ((report && report.providers) || []).forEach(function (provider) {
+      var daily = provider.daily_usage;
+      if (provider.provider !== "cursor" || !daily) return;
+      var end = Date.parse(daily.end_at);
+      if (Date.parse(daily.start_at) <= now && end > now) expiresAt = Math.min(expiresAt, end);
+    });
+    if (!isFinite(expiresAt)) return;
+    var timer = setTimeout(function () { tick[1](function (value) { return value + 1; }); }, expiresAt - now);
+    return function () { clearTimeout(timer); };
+  }, [report]);
+}
+
+function cursorExtrasPanel(h, p, translation) {
   if (p.provider !== "cursor") return null;
+  var daily = p.daily_usage;
+  if (daily && !(Date.parse(daily.start_at) <= Date.now() && Date.now() < Date.parse(daily.end_at))) daily = null;
   var spend = p.extra_usage;
   var spendLabel = spend && spend.label
     ? spend.label
@@ -358,6 +406,13 @@ function cursorExtrasPanel(h, p) {
       ),
       spend && typeof spend.limit === "number" && spend.limit > 0
         ? h("span", { style: { color: "var(--muted-foreground)" } }, "Limit " + spendAmount(spend.limit, spend.currency) + (spend.scope === "team" ? " · shared across the team" : "")) : null,
+    ),
+    h("div", { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+      h("div", { style: { display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "baseline" } },
+        h("span", { style: { fontSize: "12px", fontWeight: 600 } }, translatedText(translation, "cursorDailyUsage", "Daily Usage")),
+        h("span", { style: { color: "var(--muted-foreground)", textAlign: "right" } }, daily ? spendAmount(daily.used, daily.currency) + " " + translatedText(translation, "cursorDailySpendSuffix", "spent") : translatedText(translation, "cursorDailyNotReported", "Not reported")),
+      ),
+      h("span", { style: { color: "var(--muted-foreground)" } }, translatedText(translation, "cursorDailyTodayUtc", "Today · UTC")),
     ),
     p.detail_warning ? h("p", { style: { margin: 0, fontSize: "10.5px", lineHeight: 1.5, color: "var(--muted-foreground)" } }, p.detail_warning) : null,
   );
@@ -546,7 +601,7 @@ function resetCreditsPanel(h, provider) {
 }
 
 // ---- one provider's panel (name + plan + updated, then window bars) --------
-function providerPanel(host, p, warn, high, generatedAt, reload, isCurrent) {
+function providerPanel(host, p, warn, high, generatedAt, reload, isCurrent, translation) {
   var h = host.jsx;
   var windows = p.windows || [];
 
@@ -587,7 +642,7 @@ function providerPanel(host, p, warn, high, generatedAt, reload, isCurrent) {
         ? null
         : h("div", { style: { fontSize: "12px", opacity: 0.55 } }, "No rate-limit windows reported."),
     resetCreditsPanel(h, p),
-    cursorExtrasPanel(h, p),
+    cursorExtrasPanel(h, p, translation),
     // Augment consumption + pace, sober, below the bar.
     p.detail
       ? h(
@@ -668,7 +723,7 @@ function codexbarProblem(st) {
   return st.hint || st.error || "";
 }
 
-function panelBody(host, state, index, setIndex, reload, topBarSelection) {
+function panelBody(host, state, index, setIndex, reload, topBarSelection, translation) {
   var h = host.jsx;
   var ui = host.ui;
   var wrap = function (body) {
@@ -720,7 +775,7 @@ function panelBody(host, state, index, setIndex, reload, topBarSelection) {
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "12px" } },
       providers.length > 1 ? tabStrip(host, providers, i, d.current_provider, select) : null,
-      providerPanel(host, p, d.warn_threshold, d.high_threshold, d.generated_at, reload, d.current_provider && p.provider === d.current_provider),
+      providerPanel(host, p, d.warn_threshold, d.high_threshold, d.generated_at, reload, d.current_provider && p.provider === d.current_provider, translation),
     ),
   );
 }
@@ -748,9 +803,11 @@ function makeTopBarStatus(host) {
   return function TopBarUsage(props) {
     var ctx = (props && props.slotProps) || {};
     var mobileMenu = ctx.presentation === "mobile";
+    var translation = usePluginTranslation(host);
     var stateHook = React.useState({ loading: false, data: null, error: null });
     var state = stateHook[0];
     var setState = stateHook[1];
+    useDailyUsageExpiry(React, state.data);
     var selectedProviderHook = React.useState(function () { return readTopBarProviderPreference(); });
     var selectedProvider = selectedProviderHook[0];
     var setSelectedProvider = selectedProviderHook[1];
@@ -838,6 +895,45 @@ function makeTopBarStatus(host) {
     var d = state.data;
     var selected = topBarSelectedProvider(d && d.providers, d && d.current_provider, selectedProvider);
     var pill = pillContent(host, d, selected && selected.provider);
+    var actionIcon = selected
+      ? providerIcon(h, selected.provider, 14)
+      : gaugeIcon(h, 14);
+    var actionText = selected
+      ? ((selected.windows || []).length ? fmtPct(peakPct(selected)) : "—")
+      : undefined;
+    var actionLabel = translatedText(translation, "providerUsage", "Provider usage");
+    var trigger;
+
+    if (typeof ui.Action === "function") {
+      trigger = h(ui.Action, {
+        id: "provider-usage-topbar",
+        label: actionLabel,
+        icon: actionIcon,
+        text: actionText,
+        tooltip: "",
+        "aria-expanded": open,
+        onFocus: mobileMenu ? undefined : openNow,
+        onClick: function () { if (open) { setOpen(false); } else { openNow(); } },
+      });
+    } else {
+      trigger = h(
+        ui.Button,
+        {
+          id: "provider-usage-topbar",
+          "data-provider-usage-legacy": "true",
+          "data-provider-usage-mode": pill ? "pill" : "icon",
+          type: "button",
+          variant: "outline",
+          size: "sm",
+          className: (pill ? "h-6 gap-1.5 px-2 " : "h-6 w-6 px-0 ") + "rounded-md text-xs font-medium text-muted-foreground hover:text-foreground",
+          "aria-label": actionLabel,
+          "aria-expanded": open,
+          onFocus: mobileMenu ? undefined : openNow,
+          onClick: function () { if (open) { setOpen(false); } else { openNow(); } },
+        },
+        pill || gaugeIcon(h, 14),
+      );
+    }
 
     return h(
       "div",
@@ -848,26 +944,12 @@ function makeTopBarStatus(host) {
         onMouseEnter: mobileMenu ? undefined : openNow,
         onMouseLeave: mobileMenu ? undefined : scheduleClose,
       },
-      h(
-        ui.Button,
-        {
-          id: "provider-usage-topbar",
-          type: "button",
-          "data-provider-usage-mode": pill ? "pill" : "icon",
-          variant: "outline",
-          size: "sm",
-          className: (pill ? "h-6 gap-1.5 px-2 " : "h-6 w-6 px-0 ") + "rounded-md text-xs font-medium text-muted-foreground hover:text-foreground",
-          "aria-label": "Provider usage",
-          "aria-expanded": open,
-          onFocus: mobileMenu ? undefined : openNow,
-          onClick: function () { if (open) { setOpen(false); } else { openNow(); } },
-        },
-        pill || gaugeIcon(h, 14),
-      ),
+      trigger,
       open
         ? h(
             "div",
             {
+              "data-provider-usage-panel": "true",
               onMouseEnter: mobileMenu ? undefined : cancelClose,
               onMouseLeave: mobileMenu ? undefined : scheduleClose,
               // Stay inside the mobile menu's scroll/focus containment; its drawer is transformed.
@@ -876,7 +958,7 @@ function makeTopBarStatus(host) {
             h(
               ui.Card,
               { style: { padding: "13px 14px", maxHeight: Math.max(120, window.innerHeight - pos.top - 24) + "px", overflowY: "auto", boxShadow: "0 10px 28px rgba(15,20,40,0.20)" } },
-              panelBody(host, state, selectedProvider, selectProvider, function () { load(true); }, true),
+              panelBody(host, state, selectedProvider, selectProvider, function () { load(true); }, true, translation),
             ),
           )
         : null,
@@ -1058,7 +1140,7 @@ function statusMeterBar(host, data, ctx, mode) {
   );
 }
 
-function statusMeterDrawerRow(host, usage, warn, high) {
+function statusMeterDrawerRow(host, usage, warn, high, translation) {
   var h = host.jsx;
   var detail = statusMeterDetail(usage);
   var title = statusMeterTitle(usage, detail);
@@ -1095,12 +1177,12 @@ function statusMeterDrawerRow(host, usage, warn, high) {
       usage.provider === "codex" && detail.window && paceText(detail.window.pace)
         ? h("div", { style: { fontSize: "11px", color: "var(--muted-foreground)", fontVariantNumeric: "tabular-nums" } }, paceText(detail.window.pace)) : null,
       resetCreditsPanel(h, usage),
-      cursorExtrasPanel(h, usage),
+      cursorExtrasPanel(h, usage, translation),
     ),
   );
 }
 
-function statusMeterDrawer(host, data) {
+function statusMeterDrawer(host, data, translation) {
   var h = host.jsx;
   var providers = statusMeterProviders(data);
   if (!providers.length) return null;
@@ -1109,7 +1191,7 @@ function statusMeterDrawer(host, data) {
     { className: "flex w-full min-w-0 flex-col", "aria-label": "Provider usage" },
     h("div", { className: "pb-1 text-xs font-medium text-muted-foreground" }, "Provider usage"),
     providers.map(function (usage) {
-      return statusMeterDrawerRow(host, usage, data.warn_threshold, data.high_threshold);
+      return statusMeterDrawerRow(host, usage, data.warn_threshold, data.high_threshold, translation);
     }),
   );
 }
@@ -1121,9 +1203,11 @@ function makeAppStatusBarUsage(host) {
 
   return function AppStatusBarUsage(props) {
     var ctx = (props && props.slotProps) || {};
+    var translation = usePluginTranslation(host);
     var stateHook = React.useState({ loading: true, data: null, error: null });
     var state = stateHook[0];
     var setState = stateHook[1];
+    useDailyUsageExpiry(React, state.data);
     var indexHook = React.useState(0);
     var index = indexHook[0];
     var setIndex = indexHook[1];
@@ -1217,7 +1301,7 @@ function makeAppStatusBarUsage(host) {
     }
 
     if (mode === "off" || !data) return null;
-    if (ctx.presentation === "mobile-drawer") return statusMeterDrawer(host, data);
+    if (ctx.presentation === "mobile-drawer") return statusMeterDrawer(host, data, translation);
 
     var bar = statusMeterBar(host, data, ctx, mode);
     if (!bar) return null;
@@ -1271,7 +1355,7 @@ function makeAppStatusBarUsage(host) {
             h(
               ui.Card,
               { style: { padding: "13px 14px", maxHeight: Math.max(120, window.innerHeight - pos.bottom - 24) + "px", overflowY: "auto", boxShadow: "0 10px 28px rgba(15,20,40,0.20)" } },
-              panelBody(host, state, index, setIndex, function () { fetchOverview({ backendRefresh: true }); }),
+              panelBody(host, state, index, setIndex, function () { fetchOverview({ backendRefresh: true }); }, false, translation),
             ),
           )
         : null,
@@ -1832,14 +1916,14 @@ function settingsProviderSummary(host, provider, usage, connection, enabled, war
   );
 }
 
-function settingsProviderDetails(host, provider, usage, failure, connection, pending, report) {
+function settingsProviderDetails(host, provider, usage, failure, connection, pending, report, translation) {
   var h = host.jsx;
   return h("div", { className: "provider-settings-details" },
     usage ? h("div", { className: "provider-settings-usage" },
       usage.detail ? h("p", { className: "provider-settings-consumption" }, usage.detail) : null,
       (usage.windows || []).length ? h("div", { className: "provider-settings-quotas", "aria-label": providerLabel(provider.provider) + " usage" },
         providerWindows(h, usage, report && report.warn_threshold, report && report.high_threshold)) : null,
-      cursorExtrasPanel(h, usage),
+      cursorExtrasPanel(h, usage, translation),
       resetCreditsPanel(h, usage),
       usage.detail_warning && usage.provider !== "cursor" ? h("p", { className: "provider-settings-notice" }, usage.detail_warning) : null,
     ) : h("div", { className: "provider-settings-notice", "data-tone": connection.tone },
@@ -1891,6 +1975,7 @@ function makeSettingsStatus(host) {
 
   return function SettingsStatus(props) {
     var ctx = (props && props.slotProps) || {};
+    var translation = usePluginTranslation(host);
     // The host scopes this slot to the plugin whose page is open; guard defensively
     // so we never render on another plugin's settings page.
     if (ctx.pluginId && ctx.pluginId !== "kandev-provider-usage") return null;
@@ -1898,6 +1983,7 @@ function makeSettingsStatus(host) {
     var stateHook = React.useState({ loading: true, data: null, error: null });
     var state = stateHook[0];
     var setState = stateHook[1];
+    useDailyUsageExpiry(React, state.data);
     var updateHook = React.useState({ loading: false, error: null, message: null });
     var updateState = updateHook[0], setUpdateState = updateHook[1];
     var updating = React.useRef(false);
@@ -2122,7 +2208,7 @@ function makeSettingsStatus(host) {
             h("div", { className: "provider-settings-body" },
               h("label", { style: { display: "flex", alignItems: "center", gap: "8px", fontSize: "13px" } },
                 h("input", { type: "checkbox", checked: enabled, disabled: busy, onChange: function (event) { change("enabled:" + id, event.target.checked); } }), "Show usage"),
-              settingsProviderDetails(host, provider, enabled ? usage : null, enabled ? failure : null, connection, enabled && state.loading, providerData),
+              settingsProviderDetails(host, provider, enabled ? usage : null, enabled ? failure : null, connection, enabled && state.loading, providerData, translation),
               id === "cursor" ? h(CursorTeamSettings, { disabled: busy, onSaved: function () { fetchProviders({ restart: true }); } }) : null,
               (PROVIDER_SETTING_FIELDS[id] || []).length ? h("div", { style: gridStyle }, (PROVIDER_SETTING_FIELDS[id] || []).map(field)) : null,
             ),
@@ -2150,6 +2236,9 @@ function makeSettingsStatus(host) {
 // ==========================================================================
 window.registerKandevPlugin("kandev-provider-usage", {
   initialize: function (registry, host) {
+    if (registry && typeof registry.registerTranslations === "function") {
+      registry.registerTranslations(TRANSLATIONS);
+    }
     injectTopbarStyles();
     registry.registerComponent("main-top-bar", makeTopBarStatus(host));
     registry.registerComponent("chat-top-bar", makeTopBarStatus(host));

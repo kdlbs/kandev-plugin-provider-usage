@@ -1,0 +1,36 @@
+[
+  {
+    "provider": "codex",
+    "source": "codexbar",
+    "version": "0.45.2",
+    "usage": {
+      "primary": {
+        "usedPercent": 1234567890.1,
+        "windowMinutes": 300,
+        "resetDescription": "test reset in two hours"
+      },
+      "identity": { "planName": "Disposable smoke fixture" }
+    }
+  },
+  {
+    "provider": "cursor",
+    "source": "web",
+    "version": "0.45.2",
+    "usage": {
+      "accountEmail": "provider-smoke@example.test",
+      "identity": {
+        "accountID": "42424242",
+        "accountEmail": "provider-smoke@example.test"
+      },
+      "loginMethod": "Cursor Pro",
+      "primary": {
+        "usedPercent": 61.25,
+        "windowMinutes": 43200,
+        "resetsAt": "2026-11-01T00:00:00Z"
+      },
+      "secondary": null,
+      "tertiary": null,
+      "updatedAt": "2026-10-05T12:00:00Z"
+    }
+  }
+]
