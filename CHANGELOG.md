@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0] - 2026-10-05
+
+### Changed
+
+- feat: use host Action for provider usage topbar (#30) (66269a7)
+
+
 ## [0.9.5] - 2026-09-30
 
 ### Changed
