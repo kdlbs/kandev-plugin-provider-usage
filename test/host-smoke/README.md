@@ -50,6 +50,60 @@ fixture returns fake user `42424242`, two synthetic teams, fake usage/spend,
 and one controlled usage event. Its JSONL log omits cookies and authorization
 headers. Never route real provider credentials through this fixture.
 
+Start the fixture from the repository root with task-local certificate and
+log files. The leaf certificate must trust the task-local CA and include both
+Cursor hostnames as DNS SANs. Do not commit certificate or key files.
+
+```sh
+# Choose one unused, task-owned path and use the same value in both terminals.
+SMOKE_ROOT=/var/tmp/kpu-provider-usage-smoke
+mkdir -p "$SMOKE_ROOT/fake-cursor" "$SMOKE_ROOT/profile" "$SMOKE_ROOT/home" "$SMOKE_ROOT/tmp"
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout "$SMOKE_ROOT/fake-cursor/ca.key" \
+  -out "$SMOKE_ROOT/fake-cursor/ca.pem" -days 2 \
+  -subj '/CN=Provider Usage disposable test CA' \
+  -addext 'basicConstraints=critical,CA:TRUE' \
+  -addext 'keyUsage=critical,keyCertSign,cRLSign'
+openssl req -new -newkey rsa:2048 -nodes \
+  -keyout "$SMOKE_ROOT/fake-cursor/server.key" \
+  -out "$SMOKE_ROOT/fake-cursor/server.csr" -subj '/CN=cursor.com'
+printf '%s\n' \
+  'subjectAltName=DNS:cursor.com,DNS:api2.cursor.sh' \
+  'extendedKeyUsage=serverAuth' \
+  > "$SMOKE_ROOT/fake-cursor/server.ext"
+openssl x509 -req -in "$SMOKE_ROOT/fake-cursor/server.csr" \
+  -CA "$SMOKE_ROOT/fake-cursor/ca.pem" \
+  -CAkey "$SMOKE_ROOT/fake-cursor/ca.key" -CAcreateserial \
+  -out "$SMOKE_ROOT/fake-cursor/server.crt" -days 2 -sha256 \
+  -extfile "$SMOKE_ROOT/fake-cursor/server.ext"
+printf '%s\n' default > "$SMOKE_ROOT/fake-cursor/mode"
+python3 test/host-smoke/fake-cursor-dashboard.py \
+  --bind 127.0.0.1 --port 43972 \
+  --cert "$SMOKE_ROOT/fake-cursor/server.crt" \
+  --key "$SMOKE_ROOT/fake-cursor/server.key" \
+  --mode-file "$SMOKE_ROOT/fake-cursor/mode" \
+  --log "$SMOKE_ROOT/fake-cursor/requests.jsonl"
+```
+
+In a second terminal, run the released host with only task-owned profile paths
+and the fake HTTPS proxy. `KANDEV_BIN` must point to the tested runtime binary.
+
+```sh
+SMOKE_ROOT=/var/tmp/kpu-provider-usage-smoke
+KANDEV_BIN=/path/to/the/tested/kandev
+env HOME="$SMOKE_ROOT/home" \
+  KANDEV_HOME_DIR="$SMOKE_ROOT/profile" \
+  TMPDIR="$SMOKE_ROOT/tmp" \
+  HTTPS_PROXY=http://127.0.0.1:43972 \
+  SSL_CERT_FILE="$SMOKE_ROOT/fake-cursor/ca.pem" \
+  "$KANDEV_BIN" run --headless --port 43971 --verbose
+```
+
+The fixture rejects CONNECT requests for every host except the two Cursor
+dashboard hosts above, so external provider traffic cannot reach a real
+account. Verify the host's `/health` version and the uploaded package before
+the browser smoke.
+
 The mode file accepts `default`, `daily-503`, `excessive-events`,
 `mismatch-team`, and `mismatch-user`. Change it between explicit **Refresh
 usage** actions. The optional daily-spend request must remain bounded to page
