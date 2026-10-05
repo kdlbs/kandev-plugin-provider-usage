@@ -523,6 +523,9 @@ test("provider usage English and pt-PT labels are registered and looked up by i1
   });
   assert.equal(localized.translationCatalogs.en.providerUsage, "Provider usage");
   assert.equal(localized.translationCatalogs["pt-pt"].providerUsage, "Utilização do fornecedor");
+  assert.equal(localized.translationCatalogs.en.cursorDailyUsage, "Daily Usage");
+  assert.equal(localized.translationCatalogs["pt-pt"].cursorDailyUsage, "Utilização diária");
+  assert.equal(localized.translationCatalogs["pt-pt"].cursorDailyTodayUtc, "Hoje · UTC");
   const action = trigger(localized.render());
   assert.equal(action.props.label, "Utilização do fornecedor");
   assert.equal(action.props.tooltip, "");

@@ -34,7 +34,8 @@ function statusMeterHelpers(now) {
       " topBarSelectedProvider: typeof topBarSelectedProvider === 'function' ? topBarSelectedProvider : null," +
       " pillContent: typeof pillContent === 'function' ? pillContent : null," +
       " codexbarRow: typeof codexbarRow === 'function' ? codexbarRow : null," +
-      " codexbarProblem: typeof codexbarProblem === 'function' ? codexbarProblem : null" +
+      " codexbarProblem: typeof codexbarProblem === 'function' ? codexbarProblem : null," +
+      " translations: TRANSLATIONS" +
       " };",
     sandbox,
   );
@@ -724,6 +725,21 @@ test("Cursor Daily Usage shows today's dollars in desktop and phone details", ()
     }
     assert.equal(statusMeterDetail(usage).pct, 27);
   }
+});
+
+test("Cursor Daily Usage copy is localized with an English fallback", () => {
+  const { providerPanel, statusMeterDrawerRow, translations } = statusMeterHelpers(cursorDetailNow);
+  const portuguese = { t: (key, options) => translations["pt-pt"][key] || options.defaultValue };
+  const usage = { ...cursorDetailFixture(), daily_usage: { used: 12.34, currency: "USD", start_at: "2026-09-10T00:00:00Z", end_at: "2026-09-11T00:00:00Z" } };
+  for (const tree of [
+    providerPanel({ jsx: element }, usage, 75, 90, "", () => {}, false, portuguese),
+    statusMeterDrawerRow({ jsx: element }, usage, 75, 90, portuguese),
+  ]) {
+    assert.match(renderedText(tree), /Utilização diária.*12\.34 gastosHoje · UTC/);
+  }
+  const missing = { ...usage, daily_usage: undefined };
+  const fallback = providerPanel({ jsx: element }, missing, 75, 90, "", () => {}, false);
+  assert.match(renderedText(fallback), /Daily UsageNot reportedToday · UTC/);
 });
 
 test("Cursor daily spend from yesterday is not presented as today's spend", () => {
