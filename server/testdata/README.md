@@ -18,9 +18,15 @@ The usage-success fixture uses synthetic values with the supported JSON shape.
 It covers Cursor windows, Copilot usage, and a simultaneous provider error.
 It is not a capture from a live authorized account.
 
+The Copilot credit fixture uses synthetic values with the v0.83.0 detail-row format.
+It includes the numeric `usageValue` and `progress.used`/`progress.total` fields.
+The total represents a configured allowance. The fixture does not establish
+an enforced GitHub quota or a default allowance for any plan.
+
 Sources:
 
 - [Official release and assets](https://github.com/steipete/CodexBar/releases/tag/v0.83.0)
 - [Cursor session format](https://github.com/steipete/CodexBar/blob/v0.83.0/Sources/CodexBarCore/Providers/Cursor/CursorAppAuth.swift)
 - [Safe Storage decryption](https://github.com/steipete/CodexBar/blob/v0.83.0/Sources/CodexBarCore/ChromiumSafeStorage.swift)
 - [Copilot device login](https://github.com/steipete/CodexBar/blob/v0.83.0/docs/cli-configuration.md#copilot-device-login)
+- [Copilot credit details](https://github.com/steipete/CodexBar/blob/v0.83.0/Sources/CodexBarCore/Providers/Copilot/CopilotUsageFetcher.swift)

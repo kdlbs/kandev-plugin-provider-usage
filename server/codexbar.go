@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
@@ -203,7 +205,9 @@ const sourceOAuth = "oauth"
 // being rate-limited. `all` is a sweep, not a single provider, so it skips the
 // fast path.
 func runUsageFast(ctx context.Context, cmd resolvedCommand, run runner, provider string) ([]cbEntry, error) {
-	if provider == "" || provider == providersAll {
+	// Antigravity's auto source reads the signed-in agy CLI before its OAuth
+	// fallback. Forcing OAuth first can miss an otherwise usable CLI session.
+	if provider == "" || provider == providersAll || provider == "antigravity" {
 		return runUsage(ctx, cmd, run, provider)
 	}
 	if fast, err := runUsageSource(ctx, cmd, run, provider, sourceOAuth); err == nil && hasUsage(fast) {
@@ -263,9 +267,10 @@ type providerMatch struct {
 }
 
 var providerMatches = []providerMatch{
+	{"antigravity", []string{"antigravity", "agy"}},
 	{"claude", []string{"claude", "anthropic", "sonnet", "opus", "haiku", "fable"}},
 	{"codex", []string{"codex", "openai", "gpt", "o1", "o3", "o4"}},
-	{"gemini", []string{"gemini", "antigravity"}},
+	{"gemini", []string{"gemini"}},
 	{"copilot", []string{"copilot"}},
 	{"cursor", []string{"cursor"}},
 	{"grok", []string{"grok", "xai"}},
@@ -281,13 +286,19 @@ var providerMatches = []providerMatch{
 // providerForSession maps a kandev session to a codexbar provider id using the
 // agent profile name, display name, and model. Returns "" when nothing matches.
 func providerForSession(s pluginsdk.Session) string {
-	hay := strings.ToLower(strings.Join([]string{
-		s.AgentProfileName, s.AgentDisplayName, s.Model,
-	}, " "))
-	for _, m := range providerMatches {
-		for _, n := range m.needles {
-			if strings.Contains(hay, n) {
-				return m.provider
+	// An agent can run another vendor's model. Its account supplies the quota,
+	// so resolve the agent before falling back to the model name.
+	for _, field := range []string{s.AgentDisplayName, s.AgentProfileName, s.Model} {
+		hay := strings.ToLower(field)
+		words := strings.FieldsFunc(hay, func(r rune) bool {
+			return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+		})
+		for _, m := range providerMatches {
+			for _, n := range m.needles {
+				// Short identifiers must be whole tokens: "Example" is not Amp.
+				if (len(n) > 3 && strings.Contains(hay, n)) || slices.Contains(words, n) {
+					return m.provider
+				}
 			}
 		}
 	}

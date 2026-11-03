@@ -60,15 +60,16 @@ type ProviderUsage struct {
 	Detail string `json:"detail,omitempty"`
 	// DetailExtra is a sober sub-line under Detail — e.g. Augment's per-day
 	// average and projected month-end total.
-	DetailExtra   string        `json:"detail_extra,omitempty"`
-	FetchedAt     time.Time     `json:"fetched_at"`
-	Source        string        `json:"source,omitempty"` // codexbar source: oauth/web/cli/...
-	PacePrime     *Pace         `json:"pace_primary,omitempty"`
-	PaceSec       *Pace         `json:"pace_secondary,omitempty"`
-	ResetCredits  *ResetCredits `json:"reset_credits,omitempty"`
-	DailyUsage    *DailyUsage   `json:"daily_usage,omitempty"`
-	ExtraUsage    *UsageSpend   `json:"extra_usage,omitempty"`
-	DetailWarning string        `json:"detail_warning,omitempty"`
+	DetailExtra    string          `json:"detail_extra,omitempty"`
+	FetchedAt      time.Time       `json:"fetched_at"`
+	Source         string          `json:"source,omitempty"` // codexbar source: oauth/web/cli/...
+	PacePrime      *Pace           `json:"pace_primary,omitempty"`
+	PaceSec        *Pace           `json:"pace_secondary,omitempty"`
+	ResetCredits   *ResetCredits   `json:"reset_credits,omitempty"`
+	DailyUsage     *DailyUsage     `json:"daily_usage,omitempty"`
+	ExtraUsage     *UsageSpend     `json:"extra_usage,omitempty"`
+	DetailWarning  string          `json:"detail_warning,omitempty"`
+	CopilotCredits *CopilotCredits `json:"copilot_credits,omitempty"`
 	// Used only to verify that optional Cursor details belong to this account.
 	accountID    string
 	accountEmail string
@@ -127,16 +128,18 @@ func (e *cbError) UnmarshalJSON(data []byte) error {
 }
 
 type cbUsage struct {
-	Primary      *cbWindow       `json:"primary"`
-	Secondary    *cbWindow       `json:"secondary"`
-	Tertiary     *cbWindow       `json:"tertiary"`
-	Extra        []cbExtra       `json:"extraRateWindows"`
-	LoginMethod  string          `json:"loginMethod"`
-	Identity     *cbIdentity     `json:"identity"`
-	UpdatedAt    string          `json:"updatedAt"`
-	ResetCredits json.RawMessage `json:"codexResetCredits"`
-	ProviderCost json.RawMessage `json:"providerCost"`
-	AccountEmail string          `json:"accountEmail"`
+	Primary                   *cbWindow       `json:"primary"`
+	Secondary                 *cbWindow       `json:"secondary"`
+	Tertiary                  *cbWindow       `json:"tertiary"`
+	Extra                     []cbExtra       `json:"extraRateWindows"`
+	LoginMethod               string          `json:"loginMethod"`
+	Identity                  *cbIdentity     `json:"identity"`
+	UpdatedAt                 string          `json:"updatedAt"`
+	ResetCredits              json.RawMessage `json:"codexResetCredits"`
+	ProviderCost              json.RawMessage `json:"providerCost"`
+	AccountEmail              string          `json:"accountEmail"`
+	Details                   json.RawMessage `json:"details"`
+	CopilotMeteredZeroCredits bool            `json:"copilotMeteredZeroCredits"`
 }
 
 // UnmarshalJSON fills the fields the port spells with underscores. It carries no
@@ -274,6 +277,12 @@ func (e cbEntry) toProviderUsage(now time.Time) *ProviderUsage {
 	}
 	if e.Provider == "codex" {
 		pu.ResetCredits = e.Usage.resetCredits()
+	}
+	if e.Provider == "copilot" {
+		pu.CopilotCredits = copilotCredits(e.Usage.Details, pu.Windows)
+		if pu.CopilotCredits == nil && e.Usage.CopilotMeteredZeroCredits {
+			pu.CopilotCredits = &CopilotCredits{}
+		}
 	}
 	if e.Provider == "cursor" {
 		pu.accountEmail = e.Usage.AccountEmail

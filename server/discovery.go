@@ -87,7 +87,14 @@ func (s providerScanner) scan(cfg map[string]any) []detectedProvider {
 	}{
 		{"claude", []string{"claude", "claude-agent-acp"}, []string{filepath.Join(s.home, ".claude", ".credentials.json"), filepath.Join(s.home, ".claude.json")}},
 		{"codex", []string{"codex", "codex-acp"}, []string{filepath.Join(codexHome, "auth.json"), filepath.Join(codexHome, "config.toml")}},
-		{"gemini", []string{"gemini"}, []string{filepath.Join(s.home, ".gemini", "oauth_creds.json"), filepath.Join(s.home, ".gemini", "settings.json")}},
+		{"antigravity", []string{"agy", "antigravity", "antigravity-acp"}, []string{
+			filepath.Join(s.home, ".gemini", "antigravity-cli", "settings.json"),
+			filepath.Join(s.home, ".gemini", "antigravity-acp", "settings.json"),
+			"/Applications/Antigravity.app", filepath.Join(s.home, "Applications", "Antigravity.app"),
+			filepath.Join(s.home, "Library", "Application Support", "Antigravity", "User", "globalStorage", "state.vscdb"),
+			filepath.Join(configHome, "Antigravity", "User", "globalStorage", "state.vscdb"),
+			filepath.Join(appData, "Antigravity", "User", "globalStorage", "state.vscdb"),
+		}},
 		{"copilot", []string{"copilot"}, []string{filepath.Join(configHome, "github-copilot", "apps.json"), filepath.Join(configHome, "github-copilot", "hosts.json"), filepath.Join(s.home, ".copilot", "config.json")}},
 		{"cursor", []string{"cursor", "cursor-agent", "cursor-agent-acp"}, []string{
 			"/Applications/Cursor.app", filepath.Join(s.home, "Applications", "Cursor.app"),

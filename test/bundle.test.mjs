@@ -309,6 +309,46 @@ test("Copilot shows the premium-interaction reserve pace", () => {
   assert.match(renderedText(panel), /Premium interactions.*12% used.*39% in reserve/);
 });
 
+test("Copilot shows exact AI credit counters in the overlay and phone drawer", () => {
+  const { providerPanel, statusMeterDrawerRow, statusMeterDetail } = statusMeterHelpers(cursorDetailNow);
+  const usage = { provider: "copilot", windows: [], copilot_credits: {
+    used: 3313, allowance: 25000, allowance_source: "settings", reset_at: "2026-10-01T00:00:00Z",
+  } };
+  for (const tree of [providerPanel({ jsx: element }, usage, 75, 90, "", () => {}, false),
+    statusMeterDrawerRow({ jsx: element }, usage, 75, 90)]) {
+    assert.match(renderedText(tree), /3,313 \/ 25,000 AI credits/);
+    assert.match(renderedText(tree), /Configured monthly allowance/);
+    const meters = everyElement(tree, node => node.props.role === "meter");
+    assert.equal(meters.length, 1, "show the credit allowance once");
+    assert.equal(meters[0].props["aria-valuenow"], 3313);
+    assert.equal(meters[0].props["aria-valuemax"], 25000);
+  }
+  assert.equal(statusMeterDetail(usage).pct, 3313 / 25000 * 100);
+  usage.windows = [{ label: "Premium interactions", utilization_pct: 14 }];
+  assert.equal(statusMeterDetail(usage).pct, 14, "existing quota metrics retain priority");
+});
+
+test("Copilot credits preserve unknown totals, observed zero, and overage", () => {
+  const { providerPanel, statusMeterDetail, statusMeterDrawerRow } = statusMeterHelpers(cursorDetailNow);
+  for (const used of [0, 3313]) {
+    const usage = { provider: "copilot", windows: [], copilot_credits: { used } };
+    const panel = providerPanel({ jsx: element }, usage, 75, 90, "", () => {}, false);
+    assert.match(renderedText(panel), used ? /3,313 AI credits/ : /(?<![\d,])0 AI credits/);
+    assert.match(renderedText(panel), /Monthly allowance not reported/);
+    assert.equal(everyElement(panel, node => node.props.role === "meter").length, 0);
+    assert.equal(statusMeterDetail(usage).window, null, "unknown allowance must not become a zero-percent quota");
+    const drawerText = renderedText(statusMeterDrawerRow({ jsx: element }, usage, 75, 90));
+    assert.match(drawerText, used ? /3,313 AI credits/ : /(?<![\d,])0 AI credits/);
+    assert.doesNotMatch(drawerText, /Usage unavailable/);
+  }
+  const overage = { provider: "copilot", copilot_credits: { used: 26000, allowance: 25000 } };
+  const panel = providerPanel({ jsx: element }, overage, 75, 90, "", () => {}, false);
+  assert.match(renderedText(panel), /26,000 \/ 25,000 AI credits/);
+  assert.doesNotMatch(renderedText(panel), /Limit reached|quota exhausted/i);
+  const missing = providerPanel({ jsx: element }, { provider: "copilot", windows: [] }, 75, 90, "", () => {}, false);
+  assert.doesNotMatch(renderedText(missing), /AI credits|25,000/);
+});
+
 const resetCreditNow = Date.parse("2026-09-09T12:00:00Z");
 
 test("Codex shows reserve and deficit beside the correct quotas", () => {
@@ -569,6 +609,16 @@ test("renders the real opencode brand mark, not the monogram fallback", () => {
   const icon = providerIcon(element, "opencodego", 13, "OpenCode");
   assert.equal(icon.props.viewBox, "0 0 24 30", "uses the opencode logo canvas");
   assert.match(icon.props.dangerouslySetInnerHTML.__html, /fill-rule="evenodd"/);
+});
+
+test("Antigravity has its own provider name and brand mark", () => {
+  const { providerIcon, providerPanel } = statusMeterHelpers();
+  const icon = providerIcon(element, "antigravity", 13, "Antigravity");
+  assert.equal(icon.props.viewBox, "0 0 100 100");
+  assert.ok(icon.props.dangerouslySetInnerHTML.__html.includes("85.2843"));
+  const panel = providerPanel({ jsx: element }, { provider: "antigravity", windows: [] }, 75, 90, "", () => {}, false);
+  assert.match(renderedText(panel), /Antigravity/);
+  assert.doesNotMatch(renderedText(panel), /Gemini/);
 });
 
 test("top-bar provider preference persists and falls back to current then first available", () => {

@@ -28,7 +28,20 @@ func TestProviderForSession(t *testing.T) {
 		{"codex by display", pluginsdk.Session{AgentDisplayName: "Codex"}, "codex"},
 		{"codex by gpt model", pluginsdk.Session{Model: "gpt-5-codex"}, "codex"},
 		{"gemini", pluginsdk.Session{AgentDisplayName: "Gemini CLI"}, "gemini"},
+		{"Antigravity with a Claude model", pluginsdk.Session{AgentDisplayName: "Antigravity", Model: "claude-sonnet"}, "antigravity"},
+		{"Antigravity CLI", pluginsdk.Session{AgentProfileName: "agy", Model: "gemini-3.8"}, "antigravity"},
+		{"Antigravity ACP", pluginsdk.Session{AgentDisplayName: "Antigravity ACP", Model: "gpt-5"}, "antigravity"},
+		{"Copilot with a GPT model", pluginsdk.Session{AgentDisplayName: "GitHub Copilot", Model: "gpt-5"}, "copilot"},
 		{"copilot", pluginsdk.Session{AgentProfileName: "GitHub Copilot"}, "copilot"},
+		{"generic agent containing amp", pluginsdk.Session{AgentDisplayName: "Example", Model: "claude-opus-4"}, "claude"},
+		{"profile containing amp", pluginsdk.Session{AgentProfileName: "Campus helper", Model: "gemini-3"}, "gemini"},
+		{"generic agent containing agy", pluginsdk.Session{AgentDisplayName: "agylike", Model: "gpt-5"}, "codex"},
+		{"generic agent containing o1", pluginsdk.Session{AgentDisplayName: "demo1", Model: "claude-sonnet"}, "claude"},
+		{"generic agent containing o3", pluginsdk.Session{AgentDisplayName: "demo3", Model: "claude-sonnet"}, "claude"},
+		{"generic agent containing o4", pluginsdk.Session{AgentDisplayName: "demo4", Model: "claude-sonnet"}, "claude"},
+		{"Amp with another vendor model", pluginsdk.Session{AgentDisplayName: "Amp ACP", Model: "claude-sonnet"}, "amp"},
+		{"agy with punctuation", pluginsdk.Session{AgentProfileName: "agy-cli", Model: "claude-sonnet"}, "antigravity"},
+		{"o3 model token", pluginsdk.Session{Model: "o3-mini"}, "codex"},
 		{"cursor", pluginsdk.Session{AgentDisplayName: "Cursor Agent"}, "cursor"},
 		{"grok", pluginsdk.Session{Model: "grok-4"}, "grok"},
 		{"opencode by profile", pluginsdk.Session{AgentProfileName: "OpenCode"}, "opencodego"},
@@ -41,6 +54,20 @@ func TestProviderForSession(t *testing.T) {
 			require.Equal(t, c.want, providerForSession(c.sess))
 		})
 	}
+}
+
+func TestAntigravityUsesAutomaticCliSource(t *testing.T) {
+	var calls int
+	entries, err := runUsageFast(context.Background(), resolvedCommand{Argv: []string{"codexbar"}},
+		func(_ context.Context, _ string, args ...string) ([]byte, error) {
+			calls++
+			require.NotContains(t, args, "--source", "automatic selection must try agy before the OAuth fallback")
+			require.Contains(t, args, "antigravity")
+			return []byte(`[{"provider":"antigravity","usage":{"primary":{"usedPercent":25}}}]`), nil
+		}, "antigravity")
+	require.NoError(t, err)
+	require.Equal(t, 1, calls)
+	require.Equal(t, "antigravity", entries[0].Provider)
 }
 
 // TestRunUsage_NonZeroExitStillParses covers codexbar's behaviour: an

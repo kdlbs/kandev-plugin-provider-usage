@@ -77,7 +77,7 @@ const (
 // unlike codexbar's ~50 web-only providers, which the `all` sweep wastes time
 // probing. Each is still queried; unconfigured ones surface as unavailable.
 var defaultProviders = []string{
-	"claude", "codex", "gemini", "grok", "copilot", "cursor", "opencodego", "amp",
+	"claude", "codex", "antigravity", "grok", "copilot", "cursor", "opencodego", "amp",
 }
 
 // plugin implements pluginsdk.Plugin (via UnimplementedPlugin). Its read
@@ -113,11 +113,20 @@ type plugin struct {
 	pollMu           sync.Mutex
 	cursorSettingsMu sync.Mutex
 
-	// mu guards the snapshot pointer and its timestamp.
+	// mu guards the snapshot pointer, timestamp, and session fallback coordination.
 	mu                      sync.Mutex
 	snapshot                *AllProvidersReport
 	snapshotAt              time.Time
 	cursorSelectionRevision uint64
+	sessionFallbacks        map[string]*sessionFallback
+}
+
+type sessionFallback struct {
+	snapshot *AllProvidersReport
+	done     chan struct{}
+	usage    *ProviderUsage
+	errMsg   string
+	aborted  bool
 }
 
 var _ pluginsdk.Plugin = (*plugin)(nil)
@@ -650,6 +659,7 @@ func (p *plugin) collectProviders(ctx context.Context) *AllProvidersReport {
 			continue
 		}
 		if u := e.toProviderUsage(p.now()); u != nil {
+			applyCopilotAllowance(u, cfg)
 			report.Providers = append(report.Providers, *u)
 		}
 	}
@@ -996,32 +1006,83 @@ func (p *plugin) sessionJSON(ctx context.Context, taskID, activeSessionID string
 	}
 
 	// Provider outside the polled set (e.g. a narrowed `providers` allowlist):
-	// fetch it on demand.
+	// fetch it once and cache it until the next poll or explicit refresh.
 	if !snap.Codexbar.Installed {
 		return marshalOr(report, sessionEncodeErr)
 	}
+	report.Usage, report.Error = p.sessionUsageOnDemand(ctx, snap, report.Provider)
+	return marshalOr(report, sessionEncodeErr)
+}
+
+// sessionUsageOnDemand shares a provider query independently of the poller.
+// Fallbacks belong to one background snapshot and never alter its telemetry.
+func (p *plugin) sessionUsageOnDemand(ctx context.Context, snap *AllProvidersReport, provider string) (*ProviderUsage, string) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err.Error()
+		}
+		p.mu.Lock()
+		if current := p.snapshot; current != nil {
+			snap = current
+		}
+		if usage, errMsg, found := sessionFromSnapshot(snap, provider); found {
+			p.mu.Unlock()
+			return usage, errMsg
+		}
+		if entry := p.sessionFallbacks[provider]; entry != nil && entry.snapshot == snap {
+			p.mu.Unlock()
+			select {
+			case <-entry.done:
+				if entry.aborted {
+					continue
+				}
+				return entry.usage, entry.errMsg
+			case <-ctx.Done():
+				return nil, ctx.Err().Error()
+			}
+		}
+		entry := &sessionFallback{snapshot: snap, done: make(chan struct{})}
+		if p.sessionFallbacks == nil {
+			p.sessionFallbacks = make(map[string]*sessionFallback)
+		}
+		p.sessionFallbacks[provider] = entry
+		p.mu.Unlock()
+		usage, errMsg := p.fetchSessionUsage(ctx, provider)
+		p.mu.Lock()
+		entry.usage, entry.errMsg = usage, errMsg
+		entry.aborted = ctx.Err() != nil
+		if entry.aborted && p.sessionFallbacks[provider] == entry {
+			delete(p.sessionFallbacks, provider)
+		}
+		close(entry.done)
+		p.mu.Unlock()
+		return usage, errMsg
+	}
+}
+
+func (p *plugin) fetchSessionUsage(ctx context.Context, provider string) (*ProviderUsage, string) {
 	runCtx, cancel := context.WithTimeout(ctx, perProviderTimeout)
 	defer cancel()
-	entries, err := runUsageFast(runCtx, p.resolveCommand(runCtx), p.run, report.Provider)
+	entries, err := runUsageFast(runCtx, p.resolveCommand(runCtx), p.run, provider)
 	if err != nil {
 		log.Printf("codexbar session run failed (degrading): %v", err)
-		report.Error = providerErrMessage(err, runCtx, ctx)
-		return marshalOr(report, sessionEncodeErr)
+		return nil, providerErrMessage(err, runCtx, ctx)
 	}
-	report.Usage, report.Error = pickProviderUsage(entries, report.Provider, p.now())
-	if report.Provider == "cursor" && p.cursor != nil {
-		if usage, err := p.cursorUsage(runCtx, report.Usage); err == nil {
-			report.Usage, report.Error = usage, ""
+	usage, errMsg := pickProviderUsage(entries, provider, p.now())
+	applyCopilotAllowance(usage, p.config(ctx))
+	if provider == "cursor" && p.cursor != nil {
+		if enriched, err := p.cursorUsage(runCtx, usage); err == nil {
+			usage, errMsg = enriched, ""
 		} else {
 			var selectedTeam *cursorTeamSelectionError
 			if errors.As(err, &selectedTeam) {
-				report.Usage, report.Error = nil, err.Error()
-			} else if report.Usage != nil {
-				report.Usage.DetailWarning = err.Error()
+				usage, errMsg = nil, err.Error()
+			} else if usage != nil {
+				usage.DetailWarning = err.Error()
 			}
 		}
 	}
-	return marshalOr(report, sessionEncodeErr)
+	return usage, errMsg
 }
 
 // sessionFromSnapshot returns the snapshot's usage or error for a provider, and

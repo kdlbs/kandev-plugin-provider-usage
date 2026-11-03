@@ -61,11 +61,11 @@ func testScanner(commands, files map[string]bool, env map[string]string) provide
 
 func TestProviderDiscoveryRequiresLocalEvidence(t *testing.T) {
 	scanner := testScanner(map[string]bool{"claude": true, "copilot": true}, map[string]bool{
-		"/Applications/Cursor.app":               true,
-		"/fixture/home/.gemini/oauth_creds.json": true,
+		"/Applications/Cursor.app":                            true,
+		"/fixture/home/.gemini/antigravity-cli/settings.json": true,
 	}, nil)
 	require.Equal(t, []detectedProvider{
-		{"claude", "cli"}, {"copilot", "cli"}, {"cursor", "app"}, {"gemini", "configuration"},
+		{"antigravity", "configuration"}, {"claude", "cli"}, {"copilot", "cli"}, {"cursor", "app"},
 	}, scanner.scan(nil))
 	require.Empty(t, testScanner(nil, nil, nil).scan(nil), "absent providers must not have settings sections")
 	require.Equal(t, []detectedProvider{{"cursor", "configuration"}}, testScanner(nil, map[string]bool{
@@ -74,6 +74,23 @@ func TestProviderDiscoveryRequiresLocalEvidence(t *testing.T) {
 	require.Equal(t, []detectedProvider{{"augment", "configuration"}, {"cursor", "configuration"}}, testScanner(nil, nil, nil).scan(map[string]any{
 		configKeyAugmentToken: "secret", cursorCookieSetting: "secret",
 	}))
+}
+
+func TestAntigravityDiscoveryAndLegacyGeminiCredentials(t *testing.T) {
+	require.Equal(t, []detectedProvider{{"antigravity", "configuration"}}, testScanner(nil, map[string]bool{
+		filepath.Join("/fixture/home", "Library", "Application Support", "Antigravity", "User", "globalStorage", "state.vscdb"): true,
+	}, nil).scan(nil), "desktop data identifies Antigravity without an app or CLI in the standard locations")
+	for _, command := range []string{"agy", "antigravity", "antigravity-acp"} {
+		require.Equal(t, []detectedProvider{{"antigravity", "cli"}}, testScanner(map[string]bool{command: true}, nil, nil).scan(nil))
+	}
+	require.Equal(t, []detectedProvider{{"antigravity", "configuration"}}, testScanner(nil, map[string]bool{
+		"/fixture/home/.gemini/antigravity-acp/settings.json": true,
+	}, nil).scan(nil))
+	require.Empty(t, testScanner(nil, map[string]bool{
+		"/fixture/home/.gemini/oauth_creds.json": true,
+	}, nil).scan(nil), "legacy Gemini credentials must not claim an Antigravity connection")
+	require.Contains(t, defaultProviders, "antigravity")
+	require.NotContains(t, defaultProviders, "gemini")
 }
 
 func TestProviderDiscoveryHonorsCustomCredentialLocations(t *testing.T) {
