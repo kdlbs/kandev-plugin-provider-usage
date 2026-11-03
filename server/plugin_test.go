@@ -472,6 +472,66 @@ func TestSessionFallbackWaitIsCancellable(t *testing.T) {
 	require.EqualValues(t, 1, geminiCalls.Load())
 }
 
+type observedDoneContext struct {
+	context.Context
+	observed chan struct{}
+	once     sync.Once
+}
+
+func (c *observedDoneContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.observed) })
+	return c.Context.Done()
+}
+
+func TestCancelledSessionFallbackLeaderDoesNotFailLiveWaiters(t *testing.T) {
+	entered := make(chan struct{})
+	var attempts atomic.Int32
+	base := providerRunner(nil, map[string][]byte{
+		"codex":  []byte("[" + sampleCodexEntry + "]"),
+		"gemini": []byte(`[{"provider":"gemini","usage":{"primary":{"usedPercent":25}}}]`),
+	})
+	p := newTestPlugin(t, codexbarConfig(map[string]any{configKeyProviders: "codex"}),
+		[]pluginsdk.Session{session("gemini-session", "Gemini CLI")}, func(ctx context.Context, command string, args ...string) ([]byte, error) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			if argValue(args, "--provider") == "gemini" && attempts.Add(1) == 1 {
+				close(entered)
+				<-ctx.Done()
+				return nil, ctx.Err()
+			}
+			return base(ctx, command, args...)
+		})
+	p.pollOnce(context.Background(), 0)
+	leaderCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	leader := make(chan []byte, 1)
+	go func() { leader <- p.sessionJSON(leaderCtx, "task-1", "gemini-session", false) }()
+	<-entered
+	responses := make(chan []byte, 2)
+	for range 2 {
+		ctx := &observedDoneContext{Context: context.Background(), observed: make(chan struct{})}
+		go func() { responses <- p.sessionJSON(ctx, "task-1", "gemini-session", false) }()
+		select {
+		case <-ctx.observed:
+		case <-time.After(time.Second):
+			t.Fatal("live waiter did not join the in-flight lookup")
+		}
+	}
+	cancel()
+	for range 2 {
+		var report SessionUsageReport
+		require.NoError(t, json.Unmarshal(<-responses, &report))
+		require.Empty(t, report.Error)
+		require.NotNil(t, report.Usage)
+		require.Equal(t, 25.0, report.Usage.Windows[0].UtilizationPct)
+	}
+	var cancelled SessionUsageReport
+	require.NoError(t, json.Unmarshal(<-leader, &cancelled))
+	require.Contains(t, cancelled.Error, "cancel")
+	require.EqualValues(t, 2, attempts.Load(), "live waiters must share one replacement query")
+}
+
 func TestSessionFallbackInvalidatedByFailedPoll(t *testing.T) {
 	base := providerRunner(nil, map[string][]byte{
 		"codex":  []byte("[" + sampleCodexEntry + "]"),

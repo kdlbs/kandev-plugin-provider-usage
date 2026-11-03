@@ -126,6 +126,7 @@ type sessionFallback struct {
 	done     chan struct{}
 	usage    *ProviderUsage
 	errMsg   string
+	aborted  bool
 }
 
 var _ pluginsdk.Plugin = (*plugin)(nil)
@@ -1016,41 +1017,47 @@ func (p *plugin) sessionJSON(ctx context.Context, taskID, activeSessionID string
 // sessionUsageOnDemand shares a provider query independently of the poller.
 // Fallbacks belong to one background snapshot and never alter its telemetry.
 func (p *plugin) sessionUsageOnDemand(ctx context.Context, snap *AllProvidersReport, provider string) (*ProviderUsage, string) {
-	if err := ctx.Err(); err != nil {
-		return nil, err.Error()
-	}
-	p.mu.Lock()
-	if current := p.snapshot; current != nil {
-		snap = current
-	}
-	if usage, errMsg, found := sessionFromSnapshot(snap, provider); found {
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err.Error()
+		}
+		p.mu.Lock()
+		if current := p.snapshot; current != nil {
+			snap = current
+		}
+		if usage, errMsg, found := sessionFromSnapshot(snap, provider); found {
+			p.mu.Unlock()
+			return usage, errMsg
+		}
+		if entry := p.sessionFallbacks[provider]; entry != nil && entry.snapshot == snap {
+			p.mu.Unlock()
+			select {
+			case <-entry.done:
+				if entry.aborted {
+					continue
+				}
+				return entry.usage, entry.errMsg
+			case <-ctx.Done():
+				return nil, ctx.Err().Error()
+			}
+		}
+		entry := &sessionFallback{snapshot: snap, done: make(chan struct{})}
+		if p.sessionFallbacks == nil {
+			p.sessionFallbacks = make(map[string]*sessionFallback)
+		}
+		p.sessionFallbacks[provider] = entry
+		p.mu.Unlock()
+		usage, errMsg := p.fetchSessionUsage(ctx, provider)
+		p.mu.Lock()
+		entry.usage, entry.errMsg = usage, errMsg
+		entry.aborted = ctx.Err() != nil
+		if entry.aborted && p.sessionFallbacks[provider] == entry {
+			delete(p.sessionFallbacks, provider)
+		}
+		close(entry.done)
 		p.mu.Unlock()
 		return usage, errMsg
 	}
-	if entry := p.sessionFallbacks[provider]; entry != nil && entry.snapshot == snap {
-		p.mu.Unlock()
-		select {
-		case <-entry.done:
-			return entry.usage, entry.errMsg
-		case <-ctx.Done():
-			return nil, ctx.Err().Error()
-		}
-	}
-	entry := &sessionFallback{snapshot: snap, done: make(chan struct{})}
-	if p.sessionFallbacks == nil {
-		p.sessionFallbacks = make(map[string]*sessionFallback)
-	}
-	p.sessionFallbacks[provider] = entry
-	p.mu.Unlock()
-	usage, errMsg := p.fetchSessionUsage(ctx, provider)
-	p.mu.Lock()
-	entry.usage, entry.errMsg = usage, errMsg
-	if ctx.Err() != nil && p.sessionFallbacks[provider] == entry {
-		delete(p.sessionFallbacks, provider)
-	}
-	close(entry.done)
-	p.mu.Unlock()
-	return usage, errMsg
 }
 
 func (p *plugin) fetchSessionUsage(ctx context.Context, provider string) (*ProviderUsage, string) {
