@@ -199,7 +199,7 @@ freshness, plus setup guidance and expandable diagnostics for unavailable usage.
 Each section retains its **Show usage** switch and provider controls. Cursor's
 named team picker and session cookie live inside **Cursor**. Augment's token,
 email, budget and plan unit live inside **Augment**, when detected or configured.
-The remaining providers reuse their existing local sign-in. Paused connections
+Copilot requires separate CodexBar authorization, described below. Paused connections
 retain their section so they can be enabled again.
 
 **Shared settings** holds the refresh interval and status-bar presentation.
@@ -221,6 +221,7 @@ Configuration keys (retained for compatibility with existing installations):
 | `augment_resource`          | `credits` (default) or `usd` — which metric your Augment plan bills.                                        |
 | `cursor_cookie_header`      | Optional Cursor dashboard Cookie request header, stored as a secret. Overrides automatic Desktop and Agent CLI authentication; must match the account shown by CodexBar. Useful for a remote Kandev host. |
 | `cursor_agent_keychain`     | `off` (default) or `on`. On macOS, opt in to reading the access token saved by `agent login`; Keychain may ask once. Linux and Windows Agent auth files are read automatically. |
+| `cursor_desktop_keychain`   | `off` (default) or `on`. On macOS, permit noninteractive access to `Cursor Safe Storage` / `Cursor` for encrypted Desktop sessions. This setting is independent of Agent CLI Keychain. |
 | `codexbar_command`          | Explicit codexbar command. Empty = auto-detect / auto-download.                                             |
 | `codexbar_poll_minutes`     | Background refresh interval (default 5, minimum 1).                                                          |
 | `codexbar_providers`        | Comma-separated provider ids to poll. Empty = curated local-credential set; `"all"` = full sweep (slower).  |
@@ -250,6 +251,33 @@ could be resolved (download blocked, unsupported platform, checksum mismatch),
 `not working` when one was found but wouldn't run. Both show the raw error plus
 the next step to take. The same reason also appears in the hover panel, so a
 blank pill explains itself without a trip to Settings.
+
+### Copilot authorization
+
+Copilot CLI sign-in and CodexBar authorization are separate. An installed Copilot
+CLI does not prove that CodexBar can read usage.
+
+If Copilot needs authorization, expand **GitHub Copilot** in the plugin settings.
+Use the command in that section. The command targets the effective CLI, including
+a managed executable outside PATH. The plugin checks command support through
+read-only CLI help. Older or unsupported CLIs show upgrade instructions.
+
+For a supported installation on PATH, the command is:
+
+```sh
+codexbar config login --provider copilot
+```
+
+1. Run the displayed command on the machine that runs Kandev.
+2. Use the same operating-system user and CodexBar environment as Kandev, including `CODEXBAR_CONFIG` or `XDG_CONFIG_HOME` overrides.
+3. Complete GitHub's device authorization.
+4. Click **Refresh usage**.
+
+The plugin confirms recovery from returned usage. It does not start authorization
+during background polling. Service, network, and unsupported-source errors retain
+their diagnostics. No plugin reinstall is necessary after authorization.
+
+See the [CodexBar device-login documentation](https://github.com/steipete/CodexBar/blob/v0.83.0/docs/cli-configuration.md#copilot-device-login).
 
 ### Cursor setup and data
 
@@ -284,6 +312,16 @@ shows the selected team's name and ID. The plugin checks the session's team
 memberships, requests that team's spending data, and selects your member row.
 A failed team lookup reports an error; it never falls back to CodexBar's
 unscoped quota or to the first team in the list.
+
+Account usage can succeed while authentication for the selected team lookup
+fails. This error does not prove that Cursor Desktop is signed out. The error
+details distinguish encrypted storage, denied access, rejected sessions, and
+unavailable teams where the evidence permits.
+
+If team enumeration fails, choose **Account usage (automatic)** and click
+**Save team** to use account-wide usage. If the request fails before the saved
+selection returns, use **Save account usage (automatic)**. Both actions explicitly
+change the saved scope. The plugin does not change the selection after an error.
 
 With a team selected, included requests use that member's reported request
 count and the selected team's per-seat allowance. Extra Usage shows your
@@ -321,11 +359,25 @@ resolved on the machine running the plugin, in this order:
    configured with `AGENT_CLI_CREDENTIAL_STORE=file` uses
    `~/.cursor/auth.json`.
 
-When both automatic local sessions are available, Desktop is tried first and
-Agent CLI is retained as a fallback if that session is rejected. On macOS the
-plugin leaves Keychain untouched until access is enabled in settings. It then
-checks that the expected item exists without requesting its secret before the
-read; macOS may ask the signed-in user to allow that read.
+With both automatic local sessions available, the plugin tries Desktop first.
+Agent CLI remains a fallback after session rejection, with the existing account
+identity checks. Explicit cookie and token overrides remain authoritative.
+
+Encrypted macOS Desktop tokens require **Cursor · Desktop Safe Storage**.
+Save this setting before you reload teams. This setting permits read-only access
+to the `Cursor Safe Storage` service in Keychain. The plugin tries the `Cursor Key`
+account, then the legacy `Cursor` account only if the first item is absent.
+Denied or unavailable access stops the lookup. The plugin disables interaction
+before the lookup and limits each helper to five seconds.
+Background reads never prompt. A locked, denied, or unavailable Keychain produces
+an actionable error. Use **Cursor · Session cookie** as an alternative, or
+explicitly save **Account usage (automatic)** to retain available CodexBar usage.
+
+**Cursor · Agent CLI Keychain** controls the separate `cursor-access-token`
+credential. Its existing opt-in access policy remains unchanged. It does not
+decrypt Desktop tokens. Plain Desktop JWTs and Linux/Windows Agent auth files
+remain automatic. Encrypted Desktop storage on other platforms reports an
+unsupported-storage error.
 
 For a remote host, sign into `cursor.com` in your browser, open DevTools →
 Network, select a dashboard request and copy its **Cookie** request header into
@@ -347,7 +399,7 @@ including a reported personal zero. Shared allowances/spend are labelled as
 team data. Dollar values from the dashboard are converted from cents once.
 
 Sources: [OpenUsage's Cursor integration](https://github.com/robinebers/openusage/blob/main/docs/providers/cursor.md)
-and [CodexBar's Cursor provider](https://github.com/steipete/CodexBar/blob/v0.45.2/docs/cursor.md).
+and [CodexBar's Cursor provider](https://github.com/steipete/CodexBar/blob/v0.83.0/docs/cursor.md).
 The integration uses `/api/usage-summary`, `/api/usage`,
 and `DashboardService/GetCurrentPeriodUsage`. Failed
 optional endpoints do not discard working provider data.
@@ -420,7 +472,7 @@ the target platform's binary; `make package-host` on Linux cannot run on a Mac.
 The equivalent HTTP install, when the instance's authentication is disabled, is:
 
 ```sh
-curl -F package=@kandev-provider-usage-0.10.0.tar.gz \
+curl -F package=@kandev-provider-usage-0.10.1.tar.gz \
   http://localhost:8080/api/plugins/install
 ```
 

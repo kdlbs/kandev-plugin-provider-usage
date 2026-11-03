@@ -756,6 +756,87 @@ test("Cursor settings handles empty membership, initial auth failure and retry",
   app.unmount();
 });
 
+test("Cursor settings retains saved scope after team auth failure and explicitly saves account mode", async () => {
+  let refreshes = 0;
+  const app = mount("cursor-team-settings", { onSaved() { refreshes++; } }); app.render();
+  app.requests[0].resolve({ selected_team_id: "99", selection_known: true, teams: [], error: "Cursor desktop Safe Storage access was denied." }, false); await flush();
+  let tree = app.render();
+  assert.equal(picker(tree).props.disabled, false);
+  assert.equal(picker(tree).props.value, "99");
+  assert.match(text(tree), /Saved team \(99\)/);
+  assert.match(text(tree), /selection is unchanged/);
+  assert.doesNotMatch(text(tree), /no longer in this account/);
+  assert.equal(saveTeam(tree).props.disabled, true);
+  assert.equal(app.requests.length, 1, "failed enumeration must not save a different scope");
+  picker(tree).props.onChange({ target: { value: "" } });
+  saveTeam(app.render()).props.onClick();
+  assert.deepEqual(JSON.parse(app.requests[1].init.body), { team_id: "" });
+  app.requests[1].resolve({ selected_team_id: "" }); await flush();
+  tree = app.render();
+  assert.equal(picker(tree).props.value, "");
+  assert.equal(refreshes, 1);
+  app.unmount();
+});
+
+test("Cursor settings can explicitly save account usage after a transport failure", async () => {
+  const app = mount("cursor-team-settings"); app.render();
+  app.requests[0].reject(new Error("Network unavailable")); await flush();
+  const tree = app.render();
+  assert.equal(picker(tree).props.disabled, true);
+  const recover = nodes(tree, n => n.type === "button" && text(n) === "Save account usage (automatic)")[0];
+  assert.ok(recover);
+  assert.equal(recover.props.style.minHeight, "44px");
+  recover.props.onClick();
+  assert.deepEqual(JSON.parse(app.requests[1].init.body), { team_id: "" });
+  app.unmount();
+});
+
+test("Copilot provider section shows the effective login command and removes it after recovery", async () => {
+  const command = "'/managed cache/CodexBarCLI' 'config' 'login' '--provider' 'copilot'";
+  const failure = { provider: "copilot", code: "copilot_authorization", message: "No available fetch strategy for copilot.", setup: {
+    command, shell: "POSIX shell", hint: "Copilot CLI sign-in and CodexBar authorization are separate. Run on the machine running Kandev, using the same operating-system user. Complete GitHub's device authorization, then refresh usage.",
+  } };
+  const app = mount("plugin-settings");
+  let tree = await loadSettings(app, { providers: [], detected_providers: [{ provider: "copilot", via: "cli" }], unavailable: [failure] });
+  let section = nodes(tree, n => n.props["data-provider-settings"] === "copilot")[0];
+  assert.match(text(section), /Authorize Copilot in CodexBar/);
+  assert.match(text(section), /same operating-system user/);
+  const code = nodes(section, n => n.type === "code")[0];
+  assert.equal(text(code), command);
+  assert.equal(code.props.tabIndex, 0);
+  assert.equal(code.props.style.whiteSpace, "pre-wrap");
+  nodes(tree, n => n.type === "button" && text(n) === "Refresh usage")[0].props.onClick();
+  app.requests.at(-1).resolve({ ...snapshot, detected_providers: [{ provider: "copilot", via: "cli" }], unavailable: [], providers: [
+    { provider: "copilot", source: "api", windows: [{ label: "Premium interactions", utilization_pct: 12 }] },
+  ] }); await flush();
+  tree = app.render(); section = nodes(tree, n => n.props["data-provider-settings"] === "copilot")[0];
+  assert.match(text(section), /Connected/);
+  assert.match(text(section), /Premium interactions/);
+  assert.doesNotMatch(text(section), /Authorize Copilot/);
+  app.unmount();
+});
+
+test("Copilot service errors and Cursor team failures keep distinct recovery guidance", async () => {
+  const app = mount("plugin-settings");
+  const tree = await loadSettings(app, { providers: [], detected_providers: [{ provider: "copilot", via: "cli" }, { provider: "cursor", via: "app" }], unavailable: [
+    { provider: "copilot", message: "HTTP 503 service unavailable" },
+    { provider: "cursor", code: "cursor_team_lookup", account_usage_available: true, message: "Cursor Agent CLI's saved session is invalid. Run agent login again." },
+  ] });
+  const copilot = nodes(tree, n => n.props["data-provider-settings"] === "copilot")[0];
+  assert.match(text(copilot), /Usage could not be read/);
+  assert.match(text(copilot), /service, network, or source errors/);
+  assert.doesNotMatch(text(copilot), /Authorize Copilot|Sign-in needed/);
+  const cursor = nodes(tree, n => n.props["data-provider-settings"] === "cursor")[0];
+  assert.match(text(cursor), /Selected team lookup failed/);
+  assert.match(text(cursor), /CodexBar returned account usage/);
+  assert.match(text(cursor), /For Desktop encryption on macOS, use Desktop Safe Storage/);
+  assert.match(text(cursor), /For Agent CLI sessions, run agent login on the Kandev host/);
+  assert.match(text(cursor), /enable Agent CLI Keychain on macOS if needed/);
+  assert.match(text(cursor), /Session cookie is an alternative/);
+  assert.ok(settingsInput(cursor, "cursor_desktop_keychain"));
+  app.unmount();
+});
+
 test("Cursor settings failed save keeps the draft and saved selection distinct until retry succeeds", async () => {
   const app = mount("cursor-team-settings"); app.render();
   app.requests[0].resolve(teamList); await flush();

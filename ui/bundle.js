@@ -1619,14 +1619,14 @@ function makeCursorTeamSettings(host) {
       setState(function (s) { return Object.assign({}, s, { loading: true, error: null, message: null }); });
       host.api.fetch("webhooks/cursor-teams")
         .then(function (r) { return r.json().then(function (data) {
-          if (!r.ok || data.error) throw new Error(data.error || "Couldn't load Cursor teams.");
+          if ((!r.ok || data.error) && (typeof data.selected_team_id !== "string" || data.selection_known === false)) throw new Error(data.error || "Couldn't load Cursor teams.");
           return data;
         }); })
         .then(function (data) {
           if (!mounted.current || generation.current !== request) return;
           busy.current = false;
           setChoice(data.selected_team_id || "");
-          setState({ loading: false, saving: false, data: data, error: null, message: null });
+          setState({ loading: false, saving: false, data: data, error: data.error || null, message: null });
         })
         .catch(function (err) {
           if (!mounted.current || generation.current !== request) return;
@@ -1635,13 +1635,14 @@ function makeCursorTeamSettings(host) {
         });
     }
 
-    function save() {
-      if (!mounted.current || busy.current || !state.data || choice === state.data.selected_team_id) return;
+    function save(accountOnly) {
+      var target = accountOnly === true ? "" : choice;
+      if (!mounted.current || busy.current || (accountOnly !== true && (!state.data || target === state.data.selected_team_id))) return;
       busy.current = true;
       var request = ++generation.current;
       setState(function (s) { return Object.assign({}, s, { saving: true, error: null, message: null }); });
       host.api.fetch("webhooks/cursor-team", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ team_id: choice }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ team_id: target }),
       })
         .then(function (r) { return r.json().then(function (data) {
           if (!r.ok || data.error) throw new Error(data.error || "Couldn't save the Cursor team.");
@@ -1677,7 +1678,7 @@ function makeCursorTeamSettings(host) {
     teams.forEach(function (team) { names[team.name] = (names[team.name] || 0) + 1; });
     return h("div", null,
       h("label", { htmlFor: "provider-usage-cursor-team", style: { fontSize: "13px", fontWeight: 600 } }, "Team"),
-      h("p", { style: { fontSize: "12px", opacity: 0.65, margin: "6px 0 12px" } }, "Choose which team's usage to show. Teams come from your signed-in Cursor account."),
+      h("p", { style: { fontSize: "12px", opacity: 0.65, margin: "6px 0 12px" } }, "Choose which team's usage to show. Account usage (automatic) keeps account-wide usage when optional details fail. A selected team shows only that team's usage for your member account. Choose and save to change scope."),
       h("div", { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "8px" } },
         h("select", {
           id: "provider-usage-cursor-team", "aria-label": "Cursor team", value: choice, disabled: disabled || !state.data,
@@ -1685,16 +1686,17 @@ function makeCursorTeamSettings(host) {
             setChoice(event.target.value);
             setState(function (s) { return Object.assign({}, s, { error: null, message: null }); });
           },
-          style: { flex: "1 1 200px", minWidth: 0, maxWidth: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid var(--border)", background: "var(--background)", color: "inherit", fontSize: "13px" },
+          style: { flex: "1 1 200px", minWidth: 0, maxWidth: "100%", minHeight: "44px", padding: "8px 10px", borderRadius: "6px", border: "1px solid var(--border)", background: "var(--background)", color: "inherit", fontSize: "13px" },
         },
           h("option", { value: "" }, state.loading && !state.data ? "Loading teams…" : "Account usage (automatic)"),
-          missing ? h("option", { value: saved, disabled: true }, "Unavailable team (" + saved + ")") : null,
+          missing ? h("option", { value: saved, disabled: true }, (state.data.error ? "Saved team (" : "Unavailable team (") + saved + ")") : null,
           teams.map(function (team) { return h("option", { key: team.id, value: team.id }, team.name + (names[team.name] > 1 ? " (" + team.id + ")" : "")); }),
         ),
-        h(host.ui.Button, { type: "button", disabled: disabled || !state.data || choice === saved, onClick: save }, state.saving ? "Saving…" : "Save team"),
-        h(host.ui.Button, { type: "button", variant: "outline", disabled: disabled, onClick: load }, "Reload teams"),
+        h(host.ui.Button, { type: "button", style: { minHeight: "44px" }, disabled: disabled || !state.data || choice === saved, onClick: function () { save(); } }, state.saving ? "Saving…" : "Save team"),
+        h(host.ui.Button, { type: "button", style: { minHeight: "44px" }, variant: "outline", disabled: disabled, onClick: load }, "Reload teams"),
+        state.error && !state.data ? h(host.ui.Button, { type: "button", style: { minHeight: "44px" }, disabled: disabled, onClick: function () { save(true); } }, "Save account usage (automatic)") : null,
       ),
-      missing ? h("p", { style: { fontSize: "12px", color: COLOR.warn } }, "Your saved team is no longer in this account. Choose another team or account usage.") : null,
+      missing ? h("p", { style: { fontSize: "12px", color: COLOR.warn } }, state.data.error ? "The saved team could not be checked. Your selection is unchanged. Retry authentication or choose and save account usage." : "Your saved team is no longer in this account. Choose another team or account usage.") : null,
       state.data && !teams.length && !state.error ? h("p", { style: { fontSize: "12px", opacity: 0.65 } }, "No teams were found for this Cursor account.") : null,
       state.error ? h("p", { role: "alert", style: { fontSize: "12px", color: COLOR.high, overflowWrap: "anywhere" } }, state.error) : null,
       state.message ? h("p", { role: "status", style: { fontSize: "12px", marginBottom: 0 } }, state.message) : null,
@@ -1706,6 +1708,7 @@ var SETTINGS_SECRET_MASK = "********";
 var SETTINGS_FIELDS = {
   cursor_cookie_header: { label: "Session cookie", secret: true, hint: "Optional. Uses Cursor Desktop or Agent CLI automatically. For a remote host, save a cursor.com cookie here, then reload teams." },
   cursor_agent_keychain: { label: "Agent CLI Keychain", default: "off", options: [["off", "Off"], ["on", "Use on macOS"]], hint: "macOS only. Allows read-only access to the login saved by agent login; Keychain may ask once. Linux and Windows use the CLI auth file automatically." },
+  cursor_desktop_keychain: { label: "Desktop Safe Storage", default: "off", options: [["off", "Off"], ["on", "Use on macOS without prompts"]], hint: "macOS only. Read Cursor Safe Storage from the Cursor Key or legacy Cursor account to decrypt Desktop's session. Background reads never prompt. If access is denied or requires approval, use Session cookie or choose and save Account usage (automatic). Agent CLI Keychain controls a separate credential." },
   augment_api_token: { label: "API token", secret: true, hint: "Analytics token from app.augmentcode.com/settings/personal-api-tokens." },
   augment_email: { label: "Account email", type: "email", hint: "Your Augment organization email." },
   augment_monthly_budget: { label: "Monthly budget", type: "number", min: 0, hint: "Leave empty to use the budget reported by Augment." },
@@ -1718,7 +1721,7 @@ var SETTINGS_FIELDS = {
   codexbar_command: { label: "CLI path", hint: "Leave empty to find or download CodexBar automatically." },
 };
 var PROVIDER_SETTING_FIELDS = {
-  cursor: ["cursor_cookie_header", "cursor_agent_keychain"],
+  cursor: ["cursor_cookie_header", "cursor_desktop_keychain", "cursor_agent_keychain"],
   augment: ["augment_api_token", "augment_email", "augment_monthly_budget", "augment_resource"],
 };
 
@@ -1887,13 +1890,20 @@ function settingsConnection(provider, usage, failure, enabled, pending, config) 
   }
   if (pending) return { label: "Checking usage", tone: "neutral", summary: settingsFoundVia(provider.via), hint: "Reading usage in the background. You can configure this provider while it loads." };
   if (failure) {
+    if (id === "copilot" && failure.code === "copilot_authorization") {
+      return { label: "Needs setup", tone: "warning", summary: "Authorize Copilot in CodexBar", hint: failure.setup && failure.setup.hint || "Copilot CLI sign-in and CodexBar authorization are separate. Update CodexBar, then refresh usage for setup instructions." };
+    }
+    if (id === "cursor" && failure.code === "cursor_team_lookup") {
+      return { label: "Team unavailable", tone: "warning", summary: "Selected team lookup failed", hint: (failure.account_usage_available ? "CodexBar returned account usage, but authentication or lookup for the selected team failed. " : "The selected team's usage could not be verified. ") + "Check Connection details below for the affected credential source. For Desktop encryption on macOS, use Desktop Safe Storage. For Agent CLI sessions, run agent login on the Kandev host and enable Agent CLI Keychain on macOS if needed. Session cookie is an alternative. Then reload teams. To use account-wide usage, choose and save Account usage (automatic) below." };
+    }
     var signIn = /unauthori[sz]ed|not signed|sign in|log.?in|expired|credential|\b401\b/i.test(failure.message || "");
     return {
       label: signIn ? "Sign-in needed" : "Unavailable", tone: "warning",
       summary: signIn ? "Check your " + name + " sign-in" : "Usage could not be read",
       hint: id === "augment" ? "Check the Analytics token and account email below, then refresh usage." :
-        id === "cursor" ? "Check Cursor Desktop or run agent status on the machine running Kandev. On macOS, enable Agent CLI Keychain below. Then reload teams and refresh usage." :
-        "Check your " + name + " sign-in on the machine running Kandev, then refresh usage. CodexBar diagnostics and updates are in Shared settings → Advanced.",
+        id === "cursor" ? "Check Connection details below. For encrypted Desktop sessions on macOS, use Desktop Safe Storage or Session cookie. Agent CLI Keychain applies only to agent login. Then reload teams and refresh usage." :
+        signIn ? "Check your " + name + " sign-in on the machine running Kandev, then refresh usage. CodexBar diagnostics and updates are in Shared settings → Advanced." :
+        "Refresh usage to retry. Check Connection details for service, network, or source errors. CodexBar diagnostics and updates are in Shared settings → Advanced.",
     };
   }
   return { label: "Detected", tone: "neutral", summary: settingsFoundVia(provider.via), hint: "No usage has been reported yet. Check your " + name + " connection on this machine, then refresh usage." };
@@ -1928,6 +1938,9 @@ function settingsProviderDetails(host, provider, usage, failure, connection, pen
       usage.detail_warning && usage.provider !== "cursor" ? h("p", { className: "provider-settings-notice" }, usage.detail_warning) : null,
     ) : h("div", { className: "provider-settings-notice", "data-tone": connection.tone },
       h("strong", null, connection.summary), h("p", null, connection.hint)),
+    !usage && failure && failure.setup && failure.setup.command ? h("div", { className: "provider-settings-notice" },
+      h("p", null, "Run on the Kandev host as the same operating-system user (" + failure.setup.shell + "):"),
+      h("code", { tabIndex: 0, "aria-label": "Copilot authorization command", style: { display: "block", whiteSpace: "pre-wrap", overflowWrap: "anywhere", userSelect: "all", marginTop: "8px" } }, failure.setup.command)) : null,
     h("div", { className: "provider-settings-metadata" },
       h("span", null, settingsFoundVia(provider.via)),
       usage ? h("span", null, "Source: ", settingsSource(usage.source)) : null,
