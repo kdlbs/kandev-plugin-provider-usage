@@ -251,8 +251,7 @@ function fmtReset(w) {
   return "";
 }
 
-// peakPct returns the highest window utilization for a provider, ignoring scoped
-// windows (e.g. "Fable only") so a niche cap doesn't dominate the glance value.
+// usageDisplayWindows uses a Copilot credit allowance when quota windows are absent.
 function usageDisplayWindows(usage) {
   var windows = (usage && usage.windows) || [];
   if (windows.length) return windows;
@@ -263,6 +262,8 @@ function usageDisplayWindows(usage) {
     reset_at: credits.reset_at, reset_description: credits.reset_description, display_allowance: true }];
 }
 
+// peakPct returns the highest window utilization for a provider, ignoring scoped
+// windows (e.g. "Fable only") so a niche cap doesn't dominate the glance value.
 function peakPct(usage) {
   var windows = usageDisplayWindows(usage);
   var max = 0;
@@ -1214,7 +1215,10 @@ function statusMeterDrawerRow(host, usage, warn, high, translation) {
   var h = host.jsx;
   var detail = statusMeterDetail(usage);
   var title = statusMeterTitle(usage, detail);
-  var usageText = detail.window ? detail.used + " · " + detail.remaining : usage.detail || "Usage unavailable";
+  var credits = usage.provider === "copilot" && usage.copilot_credits;
+  var hasCreditUsage = credits && typeof credits.used === "number" && isFinite(credits.used) && credits.used >= 0;
+  var usageText = detail.window ? detail.used + " · " + detail.remaining
+    : hasCreditUsage ? "AI credit usage" : usage.detail || "Usage unavailable";
   return h(
     "div",
     {
@@ -1784,7 +1788,7 @@ var SETTINGS_FIELDS = {
   augment_email: { label: "Account email", type: "email", hint: "Your Augment organization email." },
   augment_monthly_budget: { label: "Monthly budget", type: "number", min: 0, hint: "Leave empty to use the budget reported by Augment." },
   augment_resource: { label: "Plan unit", default: "credits", options: [["credits", "Credits"], ["usd", "USD"]] },
-  copilot_monthly_credits: { label: "Included AI credits", type: "number", min: 0, hint: "Optional monthly allowance from GitHub, for example 25000. Used for display only. Leave empty to use CodexBar's allowance or show only credits used. Does not change your billing limit." },
+  copilot_monthly_credits: { label: "Included AI credits", type: "number", min: 0, hint: "Optional monthly allowance from GitHub, for example 25000. Fills a missing CodexBar total for display only. Leave empty to show only credits used when no total is reported. Does not change your billing limit." },
   codexbar_poll_minutes: { label: "Refresh every (minutes)", type: "number", min: 1, default: 5 },
   display_status_bar_mode: { label: "Status bar", default: "off", options: [["off", "Off"], ["percentage", "Percentage"], ["meter", "Meter"], ["both", "Meter and percentage"]] },
   display_pill_providers: { label: "Status bar providers", default: "" },

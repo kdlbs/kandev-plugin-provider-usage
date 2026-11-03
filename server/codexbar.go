@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
@@ -288,9 +290,13 @@ func providerForSession(s pluginsdk.Session) string {
 	// so resolve the agent before falling back to the model name.
 	for _, field := range []string{s.AgentDisplayName, s.AgentProfileName, s.Model} {
 		hay := strings.ToLower(field)
+		words := strings.FieldsFunc(hay, func(r rune) bool {
+			return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+		})
 		for _, m := range providerMatches {
 			for _, n := range m.needles {
-				if strings.Contains(hay, n) {
+				// Short identifiers must be whole tokens: "Example" is not Amp.
+				if (len(n) > 3 && strings.Contains(hay, n)) || slices.Contains(words, n) {
 					return m.provider
 				}
 			}

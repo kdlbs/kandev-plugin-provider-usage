@@ -997,32 +997,68 @@ func (p *plugin) sessionJSON(ctx context.Context, taskID, activeSessionID string
 	}
 
 	// Provider outside the polled set (e.g. a narrowed `providers` allowlist):
-	// fetch it on demand.
+	// fetch it once and cache it until the next poll or explicit refresh.
 	if !snap.Codexbar.Installed {
 		return marshalOr(report, sessionEncodeErr)
 	}
+	report.Usage, report.Error = p.sessionUsageOnDemand(ctx, snap, report.Provider)
+	return marshalOr(report, sessionEncodeErr)
+}
+
+// sessionUsageOnDemand extends the current snapshot with a provider outside the
+// polled set. The next poll or explicit refresh replaces this fallback too.
+func (p *plugin) sessionUsageOnDemand(ctx context.Context, snap *AllProvidersReport, provider string) (*ProviderUsage, string) {
+	p.pollMu.Lock()
+	defer p.pollMu.Unlock()
+	if current, _ := p.currentSnapshot(); current != nil {
+		snap = current
+	}
+	if usage, errMsg, found := sessionFromSnapshot(snap, provider); found {
+		return usage, errMsg
+	}
+	usage, errMsg := p.fetchSessionUsage(ctx, provider)
+	if ctx.Err() == nil {
+		p.mu.Lock()
+		// A settings change may invalidate the snapshot during the query.
+		if p.snapshot == snap {
+			updated := *snap
+			if usage != nil {
+				updated.Providers = append(append([]ProviderUsage(nil), snap.Providers...), *usage)
+			} else {
+				updated.Unavailable = append(append([]ProviderError(nil), snap.Unavailable...), ProviderError{
+					Provider: provider, Kind: classifyProviderError("", errMsg), Message: errMsg,
+				})
+			}
+			p.snapshot = &updated
+		}
+		p.mu.Unlock()
+	}
+	return usage, errMsg
+}
+
+func (p *plugin) fetchSessionUsage(ctx context.Context, provider string) (*ProviderUsage, string) {
 	runCtx, cancel := context.WithTimeout(ctx, perProviderTimeout)
 	defer cancel()
-	entries, err := runUsageFast(runCtx, p.resolveCommand(runCtx), p.run, report.Provider)
+	entries, err := runUsageFast(runCtx, p.resolveCommand(runCtx), p.run, provider)
 	if err != nil {
 		log.Printf("codexbar session run failed (degrading): %v", err)
-		report.Error = providerErrMessage(err, runCtx, ctx)
-		return marshalOr(report, sessionEncodeErr)
+		return nil, providerErrMessage(err, runCtx, ctx)
 	}
-	report.Usage, report.Error = pickProviderUsage(entries, report.Provider, p.now())
-	if report.Provider == "cursor" && p.cursor != nil {
-		if usage, err := p.cursorUsage(runCtx, report.Usage); err == nil {
-			report.Usage, report.Error = usage, ""
+	usage, errMsg := pickProviderUsage(entries, provider, p.now())
+	applyCopilotAllowance(usage, p.config(ctx))
+	if provider == "cursor" && p.cursor != nil {
+		if enriched, err := p.cursorUsage(runCtx, usage); err == nil {
+			usage, errMsg = enriched, ""
 		} else {
 			var selectedTeam *cursorTeamSelectionError
 			if errors.As(err, &selectedTeam) {
-				report.Usage, report.Error = nil, err.Error()
-			} else if report.Usage != nil {
-				report.Usage.DetailWarning = err.Error()
+				usage, errMsg = nil, err.Error()
+			} else if usage != nil {
+				usage.DetailWarning = err.Error()
 			}
 		}
 	}
-	return marshalOr(report, sessionEncodeErr)
+	return usage, errMsg
 }
 
 // sessionFromSnapshot returns the snapshot's usage or error for a provider, and

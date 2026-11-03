@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -358,6 +359,77 @@ func TestHandleWebhook_ProvidersCached(t *testing.T) {
 }
 
 // --- session webhook ----------------------------------------------------------
+
+func TestSessionFallbackCachesGeminiUntilRefresh(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload []byte
+		failed  bool
+	}{
+		{"usage", []byte(`[{"provider":"gemini","usage":{"primary":{"usedPercent":25}}}]`), false},
+		{"empty result", []byte(`[]`), false},
+		{"provider error", []byte(`[{"provider":"gemini","error":{"message":"Sign in required"}}]`), true},
+		{"command failure", []byte(`broken output`), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls int32
+			p := newTestPlugin(t, codexbarConfig(map[string]any{configKeyProviders: "codex"}),
+				[]pluginsdk.Session{session("gemini-session", "Gemini CLI")}, providerRunner(&calls, map[string][]byte{
+					"codex": []byte("[" + sampleCodexEntry + "]"), "gemini": tc.payload,
+				}))
+			ctx := context.Background()
+			original := p.pollOnce(ctx, 0)
+			var first SessionUsageReport
+			require.NoError(t, json.Unmarshal(p.sessionJSON(ctx, "task-1", "gemini-session", false), &first))
+			require.Equal(t, tc.failed, first.Error != "")
+			if tc.name == "usage" {
+				require.Equal(t, 25.0, first.Usage.Windows[0].UtilizationPct)
+			} else {
+				require.Nil(t, first.Usage)
+			}
+			afterFirst := atomic.LoadInt32(&calls)
+			var again SessionUsageReport
+			require.NoError(t, json.Unmarshal(p.sessionJSON(ctx, "task-1", "gemini-session", false), &again))
+			require.Equal(t, afterFirst, atomic.LoadInt32(&calls), "repeated hovers must reuse the fallback, including failures")
+			require.Equal(t, first.Usage, again.Usage)
+			require.Equal(t, first.Error, again.Error)
+			require.Len(t, original.Providers, 1, "publishing a fallback must not mutate a previously served snapshot")
+			require.Empty(t, original.Unavailable)
+			p.sessionJSON(ctx, "task-1", "gemini-session", true)
+			require.Greater(t, atomic.LoadInt32(&calls), afterFirst, "explicit refresh must rebuild fallback usage")
+		})
+	}
+}
+
+func TestConcurrentSessionFallbacksShareOneQuery(t *testing.T) {
+	var calls int32
+	p := newTestPlugin(t, codexbarConfig(map[string]any{configKeyProviders: "codex"}),
+		[]pluginsdk.Session{session("gemini-session", "Gemini CLI")}, providerRunner(&calls, map[string][]byte{
+			"codex":  []byte("[" + sampleCodexEntry + "]"),
+			"gemini": []byte(`[{"provider":"gemini","usage":{"primary":{"usedPercent":25}}}]`),
+		}))
+	p.pollOnce(context.Background(), 0)
+	before := atomic.LoadInt32(&calls)
+	start := make(chan struct{})
+	responses := make(chan []byte, 8)
+	var workers sync.WaitGroup
+	for range 8 {
+		workers.Go(func() {
+			<-start
+			responses <- p.sessionJSON(context.Background(), "task-1", "gemini-session", false)
+		})
+	}
+	close(start)
+	workers.Wait()
+	close(responses)
+	for raw := range responses {
+		var report SessionUsageReport
+		require.NoError(t, json.Unmarshal(raw, &report))
+		require.Empty(t, report.Error)
+		require.Equal(t, 25.0, report.Usage.Windows[0].UtilizationPct)
+	}
+	require.Equal(t, before+1, atomic.LoadInt32(&calls))
+}
 
 func TestHandleWebhook_SessionResolvesProvider(t *testing.T) {
 	// The chat icon serves from the same polled snapshot as the Settings page.

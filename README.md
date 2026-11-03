@@ -144,7 +144,8 @@ the UI Refresh action when a fresh provider read is needed.
 - **Copilot AI credits** show exact consumption, such as `3,313 / 25,000 AI credits`,
   in the provider panel, Settings, and the phone Status drawer.
   The plugin reads numeric credit counters from CodexBar without estimates from rounded percentages.
-  The total comes from CodexBar or the optional **Copilot → Included AI credits** setting.
+  The total comes from CodexBar. The optional **Copilot → Included AI credits** setting
+  fills a missing total, including for providers fetched on demand.
   Without a total, the plugin shows only consumed credits. The configured allowance controls
   the display and does not change a GitHub billing limit. Existing quota percentages remain independent.
 - **Provider tabs** fade at edges with hidden tabs. The horizontal scrollbar
@@ -158,7 +159,9 @@ the UI Refresh action when a fresh provider read is needed.
   few minutes (configurable); the pill and panel reuse it without running a
   provider command on every hover. The first usage request after startup can
   wait for the initial poll; settings remain usable while it runs. An explicit
-  **Refresh** rebuilds the snapshot. Each refresh tries codexbar's fast `oauth`
+  **Refresh** rebuilds the snapshot. Providers outside the polled list, including
+  legacy Gemini sessions, are fetched on demand and cached until the next poll or refresh.
+  Each refresh tries codexbar's fast `oauth`
   source first, falling back to the agent CLI only when needed.
 - **Local sign-in**: OAuth providers reuse credentials on the machine running
   Kandev (`~/.claude`, `~/.codex`, …). Cursor can use its Desktop session,

@@ -112,10 +112,21 @@ try {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     await page.evaluate(() => window.renderView("app-status-bar-right", {presentation:"mobile-drawer"}));
     await page.getByText("3,313 / 25,000 AI credits", {exact:true}).waitFor();
+    for (const used of [3313, 0]) {
+      data.providers.find(p => p.provider === "copilot").copilot_credits = {used};
+      await page.evaluate(() => window.renderView("main-top-bar"));
+      await page.getByRole("button", {name:"Provider usage",exact:true}).waitFor();
+      await page.evaluate(() => window.renderView("app-status-bar-right", {presentation:"mobile-drawer"}));
+      await expect(page.getByText("AI credit usage", {exact:true})).toBeVisible();
+      await expect(page.getByText(used.toLocaleString("en-US") + " AI credits", {exact:true})).toBeVisible();
+      await expect(page.getByText("Usage unavailable", {exact:true})).toHaveCount(0);
+      await page.screenshot({path:path.join(output,(phone?"phone":"desktop") + "-credits-" + used + ".png"),fullPage:true});
+    }
     assert.deepEqual(errors, []);
     results.push({viewport:phone?"390×844 touch emulation":"1280×900 desktop",browser:browser.version(),status:"passed",
       checks:["edge fades",...(phone?["touch activation","44px tab targets"]:["scrollbar hover/focus","no layout shift"]),
-        "tab selection","Antigravity branding","exact Copilot credits","allowance setting","Status drawer","no horizontal page overflow"]});
+        "tab selection","Antigravity branding","exact Copilot credits","allowance setting","Status drawer",
+        "unknown allowance and observed zero","no horizontal page overflow"]});
     await context.close();
   }
 } finally { await browser.close(); }

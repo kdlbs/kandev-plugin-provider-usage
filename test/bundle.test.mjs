@@ -329,14 +329,17 @@ test("Copilot shows exact AI credit counters in the overlay and phone drawer", (
 });
 
 test("Copilot credits preserve unknown totals, observed zero, and overage", () => {
-  const { providerPanel, statusMeterDetail } = statusMeterHelpers(cursorDetailNow);
+  const { providerPanel, statusMeterDetail, statusMeterDrawerRow } = statusMeterHelpers(cursorDetailNow);
   for (const used of [0, 3313]) {
     const usage = { provider: "copilot", windows: [], copilot_credits: { used } };
     const panel = providerPanel({ jsx: element }, usage, 75, 90, "", () => {}, false);
-    assert.match(renderedText(panel), used ? /3,313 AI credits/ : /0 AI credits/);
+    assert.match(renderedText(panel), used ? /3,313 AI credits/ : /(?<![\d,])0 AI credits/);
     assert.match(renderedText(panel), /Monthly allowance not reported/);
     assert.equal(everyElement(panel, node => node.props.role === "meter").length, 0);
     assert.equal(statusMeterDetail(usage).window, null, "unknown allowance must not become a zero-percent quota");
+    const drawerText = renderedText(statusMeterDrawerRow({ jsx: element }, usage, 75, 90));
+    assert.match(drawerText, used ? /3,313 AI credits/ : /(?<![\d,])0 AI credits/);
+    assert.doesNotMatch(drawerText, /Usage unavailable/);
   }
   const overage = { provider: "copilot", copilot_credits: { used: 26000, allowance: 25000 } };
   const panel = providerPanel({ jsx: element }, overage, 75, 90, "", () => {}, false);

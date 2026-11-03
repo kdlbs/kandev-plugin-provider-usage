@@ -222,9 +222,9 @@ config_schema:
       minimum: 0
       title: "Copilot · Included AI credits"
       description: >-
-        Optional monthly allowance from GitHub, for example 25000. Used for
-        display only. Leave empty to use CodexBar's configured allowance or
-        show credits used without a total. Does not change your billing limit.
+        Optional monthly allowance from GitHub, for example 25000. Fills a
+        missing CodexBar total for display only. Leave empty to show credits
+        used without a total when none is reported. Does not change your billing limit.
     display_pill_providers:
       type: string
       title: "Display · Status bar providers"

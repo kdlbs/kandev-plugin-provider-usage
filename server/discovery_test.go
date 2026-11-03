@@ -77,6 +77,9 @@ func TestProviderDiscoveryRequiresLocalEvidence(t *testing.T) {
 }
 
 func TestAntigravityDiscoveryAndLegacyGeminiCredentials(t *testing.T) {
+	require.Equal(t, []detectedProvider{{"antigravity", "configuration"}}, testScanner(nil, map[string]bool{
+		filepath.Join("/fixture/home", "Library", "Application Support", "Antigravity", "User", "globalStorage", "state.vscdb"): true,
+	}, nil).scan(nil), "desktop data identifies Antigravity without an app or CLI in the standard locations")
 	for _, command := range []string{"agy", "antigravity", "antigravity-acp"} {
 		require.Equal(t, []detectedProvider{{"antigravity", "cli"}}, testScanner(map[string]bool{command: true}, nil, nil).scan(nil))
 	}

@@ -72,7 +72,7 @@ func copilotCredits(raw json.RawMessage, windows []UtilizationWindow) *CopilotCr
 }
 
 func applyCopilotAllowance(usage *ProviderUsage, cfg map[string]any) {
-	if usage.Provider != "copilot" || usage.CopilotCredits == nil {
+	if usage == nil || usage.Provider != "copilot" || usage.CopilotCredits == nil || usage.CopilotCredits.Allowance != nil {
 		return
 	}
 	allowance := positiveFloatOr(cfg[configKeyCopilotAllowance], 0)

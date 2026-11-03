@@ -91,6 +91,7 @@ func (s providerScanner) scan(cfg map[string]any) []detectedProvider {
 			filepath.Join(s.home, ".gemini", "antigravity-cli", "settings.json"),
 			filepath.Join(s.home, ".gemini", "antigravity-acp", "settings.json"),
 			"/Applications/Antigravity.app", filepath.Join(s.home, "Applications", "Antigravity.app"),
+			filepath.Join(s.home, "Library", "Application Support", "Antigravity", "User", "globalStorage", "state.vscdb"),
 			filepath.Join(configHome, "Antigravity", "User", "globalStorage", "state.vscdb"),
 			filepath.Join(appData, "Antigravity", "User", "globalStorage", "state.vscdb"),
 		}},

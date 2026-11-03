@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/pkg/pluginsdk"
 	"github.com/stretchr/testify/require"
 )
 
@@ -90,6 +91,12 @@ func TestCopilotAllowanceAppliedByPollWithoutInventingQuota(t *testing.T) {
 }
 
 func TestCopilotAllowanceValidationAndObservedZero(t *testing.T) {
+	reported := &ProviderUsage{Provider: "copilot", CopilotCredits: &CopilotCredits{
+		Used: 3313, Allowance: floatPtr(25000), AllowanceSource: "codexbar",
+	}}
+	applyCopilotAllowance(reported, map[string]any{configKeyCopilotAllowance: 10000.0})
+	require.Equal(t, 25000.0, *reported.CopilotCredits.Allowance)
+	require.Equal(t, "codexbar", reported.CopilotCredits.AllowanceSource)
 	for _, allowance := range []any{nil, "25000", -1.0, 0.0, math.NaN(), math.Inf(1)} {
 		usage := &ProviderUsage{Provider: "copilot", CopilotCredits: &CopilotCredits{Used: 3313}}
 		applyCopilotAllowance(usage, map[string]any{configKeyCopilotAllowance: allowance})
@@ -101,4 +108,39 @@ func TestCopilotAllowanceValidationAndObservedZero(t *testing.T) {
 	usage := &ProviderUsage{Provider: "copilot"}
 	applyCopilotAllowance(usage, map[string]any{configKeyCopilotAllowance: 25000.0})
 	require.Nil(t, usage.CopilotCredits, "a configured total alone is not evidence of zero consumption")
+}
+
+func TestCopilotSessionFallbackUsesConfiguredAllowance(t *testing.T) {
+	raw, err := os.ReadFile("testdata/codexbar-v0.83.0-copilot-credits.json")
+	require.NoError(t, err)
+	var entries []map[string]any
+	require.NoError(t, json.Unmarshal(raw, &entries))
+	usage := entries[0]["usage"].(map[string]any)
+	row := usage["details"].([]any)[0].(map[string]any)["rows"].([]any)[0].(map[string]any)
+	delete(row, "progress")
+	withoutAllowance, err := json.Marshal(entries)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name, source string
+		payload      []byte
+		want         float64
+	}{
+		{"missing total", "settings", withoutAllowance, 10000},
+		{"reported total", "codexbar", raw, 25000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := newTestPlugin(t, codexbarConfig(map[string]any{
+				configKeyProviders: "codex", configKeyCopilotAllowance: 10000.0,
+			}), []pluginsdk.Session{session("copilot-session", "GitHub Copilot")}, providerRunner(nil, map[string][]byte{
+				"codex": []byte("[" + sampleCodexEntry + "]"), "copilot": tc.payload,
+			}))
+			var report SessionUsageReport
+			require.NoError(t, json.Unmarshal(p.sessionJSON(context.Background(), "task-1", "copilot-session", false), &report))
+			require.Empty(t, report.Error)
+			require.NotNil(t, report.Usage)
+			require.NotNil(t, report.Usage.CopilotCredits.Allowance)
+			require.Equal(t, tc.want, *report.Usage.CopilotCredits.Allowance)
+			require.Equal(t, tc.source, report.Usage.CopilotCredits.AllowanceSource)
+		})
+	}
 }
