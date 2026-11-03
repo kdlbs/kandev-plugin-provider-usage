@@ -1,0 +1,62 @@
+CodexBar 0.83.0
+
+Usage:
+  codexbar config validate [--format text|json]
+                         [--json]
+                         [--json-only]
+                         [--json-output] [--log-level <trace|verbose|debug|info|warning|error|critical>]
+                         [-v|--verbose]
+                         [--pretty]
+  codexbar config dump [--show-secrets] [--format text|json]
+                     [--json]
+                     [--json-only]
+                     [--json-output] [--log-level <trace|verbose|debug|info|warning|error|critical>]
+                     [-v|--verbose]
+                     [--pretty]
+  codexbar config preferences export [--file <preferences.json>]
+  codexbar config preferences import --file <preferences.json> [--json]
+  codexbar config login --provider copilot [--json]
+  codexbar config providers [--format text|json] [--json] [--json-only] [--pretty]
+  codexbar config enable --provider <name> [--format text|json] [--json] [--json-only] [--pretty]
+  codexbar config disable --provider <name> [--format text|json] [--json] [--json-only] [--pretty]
+  codexbar config set-source --provider <name> --source auto|web|cli|oauth|api
+                           [--format text|json] [--json] [--json-only] [--pretty]
+  codexbar config set-api-key --provider <name> (--api-key <key>|--stdin)
+                            [--label <label>] [--usage-scope team]
+                            [--organization-id <org>] [--workspace-id <project>]
+                            [--no-enable]
+                            [--format text|json] [--json] [--json-only] [--pretty]
+  codexbar config set-cookie --provider <name> (--cookie <header>|--stdin) [--no-enable]
+                           [--format text|json] [--json] [--json-only] [--pretty]
+  codexbar config clear-credential --provider <name> [--api-key] [--cookie]
+                                 [--format text|json] [--json] [--json-only] [--pretty]
+
+Description:
+  Validate or print the CodexBar config file (default: validate).
+  dump prints normalized config JSON with stored credentials redacted by default
+  (use --show-secrets to reveal raw values).
+  preferences transfers allowlisted UI settings on macOS; import applies in the running app or next launch.
+  Export writes JSON to stdout unless --file is supplied. --defaults-domain selects an alternate app domain.
+  providers lists persistent provider enablement.
+  enable/disable updates the same provider toggle used by Settings.
+  set-source stores a supported data source without changing provider enablement; auto clears the override.
+  set-api-key stores a provider API key in the resolved config file and enables that provider by default.
+  For z.ai team usage, add --usage-scope team with BigModel organization and project IDs; this stores
+  the key as a token account instead of a provider-level personal key.
+  set-cookie stores a manual Cookie header and sets the provider's cookie source to manual, like pasting
+  a cookie in Settings; it enables that provider by default and rejects providers that do not read one.
+  clear-credential removes the stored API key and manual cookie; pass --api-key or --cookie to clear only one.
+  Enablement, data and cookie sources, and token accounts are unchanged.
+
+Examples:
+  codexbar config validate --format json --pretty
+  codexbar config dump --pretty
+  codexbar config providers
+  codexbar config enable --provider grok
+  codexbar config disable --provider cursor
+  codexbar config set-source --provider claude --source cli
+  printf '%s' "$ELEVENLABS_API_KEY" | codexbar config set-api-key --provider elevenlabs --stdin
+  printf '%s' "$Z_AI_API_KEY" | codexbar config set-api-key --provider zai --stdin \
+    --label Team --usage-scope team --organization-id org_... --workspace-id proj_...
+  pbpaste | codexbar config set-cookie --provider claude --stdin
+  codexbar config clear-credential --provider claude --cookie

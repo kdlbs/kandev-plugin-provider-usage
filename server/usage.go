@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"time"
 )
 
@@ -23,6 +24,9 @@ type UtilizationWindow struct {
 	// can exclude it from the at-a-glance peak while still listing it.
 	Scoped bool   `json:"scoped,omitempty"`
 	Detail string `json:"detail,omitempty"` // e.g. included requests or a shared team allowance
+	// Keep Codex pace with its window: omitted primary/secondary slots are
+	// removed from Windows, so array indices cannot identify their pace sides.
+	Pace *Pace `json:"pace,omitempty"`
 }
 
 // Pace carries codexbar's optional burn-rate summary for a window ("52% in
@@ -54,6 +58,7 @@ type ProviderUsage struct {
 	PacePrime     *Pace         `json:"pace_primary,omitempty"`
 	PaceSec       *Pace         `json:"pace_secondary,omitempty"`
 	ResetCredits  *ResetCredits `json:"reset_credits,omitempty"`
+	DailyUsage    *DailyUsage   `json:"daily_usage,omitempty"`
 	ExtraUsage    *UsageSpend   `json:"extra_usage,omitempty"`
 	DetailWarning string        `json:"detail_warning,omitempty"`
 	// Used only to verify that optional Cursor details belong to this account.
@@ -66,6 +71,9 @@ type UsageSpend struct {
 	Limit    *float64 `json:"limit,omitempty"`
 	Currency string   `json:"currency"`
 	Scope    string   `json:"scope,omitempty"` // "team" when this is shared spend
+	// Label overrides "Extra Usage" when Cursor reports a different spend
+	// category, such as overallSpendCents (included plus on-demand usage).
+	Label string `json:"label,omitempty"`
 }
 
 // --- codexbar JSON wire types (subset of `codexbar usage --format json`) ------
@@ -172,6 +180,7 @@ type cbWindow struct {
 	ResetDescription string  `json:"resetDescription"`
 	UsedPercent      float64 `json:"usedPercent"`
 	WindowMinutes    int     `json:"windowMinutes"`
+	usageReported    bool
 }
 
 // UnmarshalJSON fills the fields the port spells with underscores. A window the
@@ -179,14 +188,22 @@ type cbWindow struct {
 // rule can't lose a legitimately empty window.
 func (w *cbWindow) UnmarshalJSON(data []byte) error {
 	type alias cbWindow
-	if err := json.Unmarshal(data, (*alias)(w)); err != nil {
+	camel := struct {
+		*alias
+		UsedPercent *float64 `json:"usedPercent"`
+	}{alias: (*alias)(w)}
+	if err := json.Unmarshal(data, &camel); err != nil {
 		return err
 	}
+	w.usageReported = camel.UsedPercent != nil
+	if camel.UsedPercent != nil {
+		w.UsedPercent = *camel.UsedPercent
+	}
 	var snake struct {
-		ResetsAt         string  `json:"resets_at"`
-		ResetDescription string  `json:"reset_description"`
-		UsedPercent      float64 `json:"used_percent"`
-		WindowMinutes    int     `json:"window_minutes"`
+		ResetsAt         string          `json:"resets_at"`
+		ResetDescription string          `json:"reset_description"`
+		UsedPercent      json.RawMessage `json:"used_percent"`
+		WindowMinutes    int             `json:"window_minutes"`
 	}
 	_ = json.Unmarshal(data, &snake) // best-effort, see cbUsage.UnmarshalJSON
 	if w.ResetsAt == "" {
@@ -195,8 +212,12 @@ func (w *cbWindow) UnmarshalJSON(data []byte) error {
 	if w.ResetDescription == "" {
 		w.ResetDescription = snake.ResetDescription
 	}
-	if w.UsedPercent == 0 {
-		w.UsedPercent = snake.UsedPercent
+	var snakePercent *float64
+	if json.Unmarshal(snake.UsedPercent, &snakePercent) == nil && snakePercent != nil {
+		w.usageReported = true
+		if w.UsedPercent == 0 {
+			w.UsedPercent = *snakePercent
+		}
 	}
 	if w.WindowMinutes == 0 {
 		w.WindowMinutes = snake.WindowMinutes
@@ -260,7 +281,99 @@ func (e cbEntry) toProviderUsage(now time.Time) *ProviderUsage {
 		pu.PacePrime = e.Pace.Primary.toPace()
 		pu.PaceSec = e.Pace.Secondary.toPace()
 	}
+	if e.Provider == "codex" {
+		paces := [3]*Pace{pu.PacePrime, pu.PaceSec, nil}
+		index := 0
+		for slot, window := range []*cbWindow{e.Usage.Primary, e.Usage.Secondary, e.Usage.Tertiary} {
+			if window == nil {
+				continue
+			}
+			pace := paces[slot]
+			if pace == nil || pace.Summary == "" {
+				// Evaluate consumption and elapsed time at the same snapshot.
+				pace = nil
+				if now.Before(pu.Windows[index].ResetAt) && !pu.FetchedAt.After(now) {
+					pace = window.fixedWindowPace(pu.FetchedAt)
+				}
+			}
+			pu.Windows[index].Pace = pace
+			switch slot {
+			case 0:
+				pu.PacePrime = pace
+			case 1:
+				pu.PaceSec = pace
+			}
+			index++
+		}
+		for _, extra := range e.Usage.Extra {
+			if extra.Window == nil || extra.ID == codexResetCreditsWindowID {
+				continue
+			}
+			if now.Before(pu.Windows[index].ResetAt) && !pu.FetchedAt.After(now) {
+				pu.Windows[index].Pace = extra.Window.fixedWindowPace(pu.FetchedAt)
+			}
+			index++
+		}
+	}
+	// CodexBar's Copilot API response currently carries a calendar-month reset
+	// but omits windowMinutes and pace. Derive the same linear reserve/deficit
+	// signal from the previous calendar-month boundary, without replacing pace
+	// if a future CodexBar version supplies it.
+	if e.Provider == "copilot" && pu.PacePrime == nil && len(pu.Windows) > 0 {
+		pu.PacePrime = copilotMonthlyPace(pu.Windows[0], now)
+	}
 	return pu
+}
+
+func (w *cbWindow) fixedWindowPace(now time.Time) *Pace {
+	if !w.usageReported || w.WindowMinutes <= 0 || w.WindowMinutes > int(math.MaxInt64/int64(time.Minute)) ||
+		math.IsNaN(w.UsedPercent) || math.IsInf(w.UsedPercent, 0) || w.UsedPercent < 0 || w.UsedPercent > 100 {
+		return nil
+	}
+	reset := parseTimeOr(w.ResetsAt, time.Time{})
+	if reset.IsZero() {
+		return nil
+	}
+	start := reset.Add(-time.Duration(w.WindowMinutes) * time.Minute)
+	return linearUsagePace(w.UsedPercent, start, reset, now)
+}
+
+func copilotMonthlyPace(window UtilizationWindow, now time.Time) *Pace {
+	reset := window.ResetAt
+	if reset.IsZero() {
+		return nil
+	}
+	return linearUsagePace(window.UtilizationPct, reset.AddDate(0, -1, 0), reset, now)
+}
+
+func linearUsagePace(usedPct float64, start, reset, now time.Time) *Pace {
+	if start.IsZero() || reset.IsZero() {
+		return nil
+	}
+	if now.Before(start) || !now.Before(reset) {
+		return nil
+	}
+	duration := reset.Sub(start)
+	if duration <= 0 {
+		return nil
+	}
+	expected := now.Sub(start).Seconds() / duration.Seconds() * 100
+	// Match CodexBar's confidence guard: an early-window linear projection is
+	// too noisy to present as meaningful pace.
+	if expected < 3 {
+		return nil
+	}
+	delta := usedPct - expected
+	roundedDelta := math.Round(math.Abs(delta))
+	expectedText := fmt.Sprintf("Expected %.0f%% used", math.Round(expected))
+	switch {
+	case roundedDelta < 1:
+		return &Pace{Stage: "onPace", Summary: "On pace | " + expectedText}
+	case delta < 0:
+		return &Pace{Stage: "behind", Summary: fmt.Sprintf("%.0f%% in reserve | %s", roundedDelta, expectedText)}
+	default:
+		return &Pace{Stage: "ahead", Summary: fmt.Sprintf("%.0f%% in deficit | %s", roundedDelta, expectedText)}
+	}
 }
 
 func (u *cbUsage) planName() string {
@@ -279,9 +392,12 @@ func (u *cbUsage) windows(provider string) []UtilizationWindow {
 			continue
 		}
 		window := w.toWindow(defaultWindowLabel(i, w.WindowMinutes))
-		if provider == "cursor" {
+		switch provider {
+		case "cursor":
 			window.Label = []string{"Total Usage", "Auto Usage", "API Usage"}[i]
 			window.Scoped = i > 0
+		case "copilot":
+			window.Label = []string{"Premium interactions", "Chat", "Completions"}[i]
 		}
 		out = append(out, window)
 	}

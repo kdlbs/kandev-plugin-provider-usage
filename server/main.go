@@ -12,8 +12,15 @@
 // plugin author would.
 package main
 
-import "github.com/kandev/kandev/pkg/pluginsdk"
+import (
+	"os"
+
+	"github.com/kandev/kandev/pkg/pluginsdk"
+)
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == cursorSafeStorageHelper {
+		os.Exit(cursorSafeStorageHelperMain())
+	}
 	pluginsdk.Serve(newPlugin())
 }

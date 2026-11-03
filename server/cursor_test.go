@@ -171,15 +171,145 @@ func TestCursorFetchEnrichesOnlySameAccount(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, out.Windows, 3)
 	require.Empty(t, out.DetailWarning)
-	require.Equal(t, int32(4), count.Load())
+	require.Equal(t, int32(5), count.Load())
 	base := cursorBase(t)
 	base.accountID = "another-account"
 	_, err = c.fetch(context.Background(), nil, base, cursorTestNow)
 	require.ErrorContains(t, err, "different or unverified account")
-	require.Equal(t, int32(5), count.Load(), "mismatched accounts stop before all detail calls")
+	require.Equal(t, int32(6), count.Load(), "mismatched accounts stop before all detail calls")
 	base.accountID, base.accountEmail = "", ""
 	_, err = c.fetch(context.Background(), nil, base, cursorTestNow)
 	require.ErrorContains(t, err, "unverified account")
+}
+
+func TestCursorFetchFallsBackToAgentCLIAuth(t *testing.T) {
+	var identityCalls atomic.Int32
+	c := cursorTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/auth/me" {
+			identityCalls.Add(1)
+			if strings.Contains(r.Header.Get("Cookie"), "stale_user") {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+		}
+		cursorFixtureHandler(nil)(w, r)
+	})
+	stale, err := cursorBearerAuth(cursorAuthFixtureFor("stale_user"))
+	require.NoError(t, err)
+	agent, err := cursorBearerAuth(cursorAuthFixtureFor("user_test"))
+	require.NoError(t, err)
+	stale.alternates = []cursorAuth{agent}
+	c.auth = func(context.Context, map[string]any) (cursorAuth, error) { return stale, nil }
+
+	out, err := c.fetch(context.Background(), nil, cursorBase(t), cursorTestNow)
+	require.NoError(t, err)
+	require.Len(t, out.Windows, 3)
+	require.Equal(t, int32(2), identityCalls.Load())
+}
+
+func TestCursorFetchDoesNotSwitchAccountsAfterPrimaryUsageFailure(t *testing.T) {
+	var agentIdentityCalls atomic.Int32
+	c := cursorTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		desktop := strings.Contains(r.Header.Get("Cookie"), "desktop_user")
+		switch r.URL.Path {
+		case "/api/auth/me":
+			if desktop {
+				_, _ = w.Write([]byte(`{"sub":"desktop_user","email":"desktop@example.test"}`))
+				return
+			}
+			agentIdentityCalls.Add(1)
+			cursorFixtureHandler(nil)(w, r)
+		case "/api/usage-summary", "/api/usage", "/aiserver.v1.DashboardService/GetCurrentPeriodUsage":
+			if desktop || strings.HasPrefix(r.URL.Path, "/aiserver") {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			cursorFixtureHandler(nil)(w, r)
+		default:
+			cursorFixtureHandler(nil)(w, r)
+		}
+	})
+	desktop, err := cursorBearerAuth(cursorAuthFixtureFor("desktop_user"))
+	require.NoError(t, err)
+	agent, err := cursorBearerAuth(cursorAuthFixtureFor("user_test"))
+	require.NoError(t, err)
+	desktop.alternates = []cursorAuth{agent}
+	c.auth = func(context.Context, map[string]any) (cursorAuth, error) { return desktop, nil }
+
+	_, err = c.fetch(context.Background(), nil, nil, cursorTestNow)
+	require.ErrorContains(t, err, "did not return usable account usage")
+	require.Zero(t, agentIdentityCalls.Load(), "a quota failure must not silently switch to another account")
+}
+
+func TestCursorFetchRetriesDownstreamRejectionOnlyForSameAccount(t *testing.T) {
+	for _, testCase := range []struct {
+		name      string
+		agentUser string
+		wantErr   string
+	}{
+		{name: "same account", agentUser: "desktop_user"},
+		{name: "different account", agentUser: "agent_user", wantErr: "signed in to different accounts"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			var identityCalls atomic.Int32
+			c := cursorTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/auth/me" {
+					call := identityCalls.Add(1)
+					user := "desktop_user"
+					if call > 1 {
+						user = testCase.agentUser
+					}
+					_, _ = w.Write([]byte(`{"sub":"` + user + `","email":"` + user + `@example.test"}`))
+					return
+				}
+				if identityCalls.Load() == 1 && r.URL.Path != "/api/usage-summary" {
+					w.WriteHeader(http.StatusUnauthorized)
+					return
+				}
+				cursorFixtureHandler(nil)(w, r)
+			})
+			desktop, err := cursorBearerAuth(cursorAuthFixtureFor("desktop_user"))
+			require.NoError(t, err)
+			agent, err := cursorBearerAuth(cursorAuthFixtureFor(testCase.agentUser))
+			require.NoError(t, err)
+			desktop.alternates = []cursorAuth{agent}
+			c.auth = func(context.Context, map[string]any) (cursorAuth, error) { return desktop, nil }
+
+			out, err := c.fetch(context.Background(), nil, nil, cursorTestNow)
+			if testCase.wantErr != "" {
+				require.ErrorContains(t, err, testCase.wantErr)
+				require.Nil(t, out)
+			} else {
+				require.NoError(t, err)
+				require.Len(t, out.Windows, 3)
+			}
+			require.Equal(t, int32(2), identityCalls.Load())
+		})
+	}
+}
+
+func TestCursorFetchReportsAgentLoadErrorOnlyWhenFallbackIsNeeded(t *testing.T) {
+	for _, testCase := range []struct {
+		name       string
+		statusCode int
+		want       string
+	}{
+		{name: "desktop rejected", statusCode: http.StatusUnauthorized, want: "Agent CLI saved session is unreadable"},
+		{name: "desktop service failure", statusCode: http.StatusServiceUnavailable, want: "Cursor returned HTTP 503"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			c := cursorTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(testCase.statusCode)
+			})
+			desktop, err := cursorBearerAuth(cursorAuthFixtureFor("desktop_user"))
+			require.NoError(t, err)
+			desktop.alternateErr = errors.New("Cursor Agent CLI saved session is unreadable")
+			c.auth = func(context.Context, map[string]any) (cursorAuth, error) { return desktop, nil }
+
+			_, err = c.fetch(context.Background(), nil, nil, cursorTestNow)
+			require.ErrorContains(t, err, testCase.want)
+		})
+	}
 }
 
 func TestCursorOptionalFailuresKeepQuotaAndDoNotLeakResponseBodies(t *testing.T) {
@@ -222,11 +352,15 @@ func TestCursorRequestsHaveCorrectAuthScopeAndUser(t *testing.T) {
 			if r.Method != http.MethodPost || r.Header.Get("Connect-Protocol-Version") != "1" || r.Header.Get("Authorization") == "" || r.Header.Get("Cookie") != "" {
 				t.Error("incorrect RPC request auth or method")
 			}
+		} else if r.URL.Path == "/api/dashboard/get-filtered-usage-events" {
+			if r.Method != http.MethodPost || r.Header.Get("Cookie") == "" || r.Header.Get("Origin") == "" || r.Header.Get("Authorization") != "" {
+				t.Error("incorrect daily usage request auth or method")
+			}
 		} else if r.Method != http.MethodGet || r.Header.Get("Cookie") == "" || r.Header.Get("Authorization") != "" {
 			t.Error("incorrect REST request auth or method")
 		}
 		switch r.URL.Path {
-		case "/api/auth/me", "/api/usage-summary", "/aiserver.v1.DashboardService/GetCurrentPeriodUsage":
+		case "/api/auth/me", "/api/usage-summary", "/aiserver.v1.DashboardService/GetCurrentPeriodUsage", "/api/dashboard/get-filtered-usage-events":
 		case "/api/usage":
 			if r.URL.Query().Get("user") != "user_test" {
 				t.Error("usage request must identify the verified user")
@@ -260,7 +394,7 @@ func TestCursorEnrichmentUsesSharedSnapshotAndHonorsAllowlist(t *testing.T) {
 	require.Len(t, report.Providers[0].Windows, 3)
 	_, err := p.HandleWebhook(context.Background(), webhookGet(webhookKeyProviders, ""))
 	require.NoError(t, err)
-	require.Equal(t, int32(4), count.Load(), "webhooks must reuse the warm snapshot")
+	require.Equal(t, int32(5), count.Load(), "webhooks must reuse the warm snapshot")
 	encoded, err := json.Marshal(report)
 	require.NoError(t, err)
 	require.NotContains(t, string(encoded), "cursor@example.test")
@@ -269,7 +403,44 @@ func TestCursorEnrichmentUsesSharedSnapshotAndHonorsAllowlist(t *testing.T) {
 	p = newTestPlugin(t, codexbarConfig(map[string]any{"codexbar_providers": "claude"}), nil, providerRunner(nil, map[string][]byte{"claude": []byte(sampleClaudeJSON)}))
 	p.cursor = cursorTestClient(t, cursorFixtureHandler(&count))
 	p.pollOnce(context.Background(), 0)
-	require.Equal(t, int32(4), count.Load())
+	require.Equal(t, int32(5), count.Load())
+}
+
+func TestCursorDirectUsageSurvivesCodexbarInstallFailure(t *testing.T) {
+	var codexbarCalls, cursorCalls atomic.Int32
+	p := newTestPlugin(t, codexbarConfig(map[string]any{"codexbar_providers": "cursor"}), nil,
+		func(context.Context, string, ...string) ([]byte, error) {
+			codexbarCalls.Add(1)
+			return nil, errors.New("exec: codexbar: not found")
+		})
+	p.now = func() time.Time { return cursorTestNow }
+	p.cursor = cursorTestClient(t, cursorFixtureHandler(&cursorCalls))
+
+	report := p.pollOnce(context.Background(), 0)
+
+	require.False(t, report.Codexbar.Installed)
+	require.Equal(t, int32(1), codexbarCalls.Load(), "only the failed version probe reaches codexbar")
+	require.Equal(t, int32(5), cursorCalls.Load(), "identity and detail APIs are fetched directly")
+	require.Empty(t, report.Unavailable)
+	require.Len(t, report.Providers, 1)
+	require.Equal(t, "cursor", report.Providers[0].Provider)
+	require.Len(t, report.Providers[0].Windows, 3)
+}
+
+func TestCursorDirectFailureSurvivesCodexbarInstallFailure(t *testing.T) {
+	p := newTestPlugin(t, codexbarConfig(map[string]any{"codexbar_providers": "cursor"}), nil,
+		func(context.Context, string, ...string) ([]byte, error) {
+			return nil, errors.New("exec: codexbar: not found")
+		})
+	p.cursor = &cursorClient{auth: func(context.Context, map[string]any) (cursorAuth, error) {
+		return cursorAuth{}, errors.New(cursorDetailHint)
+	}}
+
+	report := p.pollOnce(context.Background(), 0)
+
+	require.False(t, report.Codexbar.Installed)
+	require.Empty(t, report.Providers)
+	require.Equal(t, []ProviderError{{Provider: "cursor", Message: cursorDetailHint}}, report.Unavailable)
 }
 
 func TestCursorAuthFailurePreservesBaselineAndOtherProviders(t *testing.T) {

@@ -399,8 +399,11 @@ func (p *plugin) statusJSON(ctx context.Context, refresh bool) []byte {
 // support on this OS, ...), surfaced so the Settings page can list it as
 // unavailable rather than silently dropping it.
 type ProviderError struct {
-	Provider string `json:"provider"`
-	Message  string `json:"message"`
+	Provider              string         `json:"provider"`
+	Message               string         `json:"message"`
+	Code                  string         `json:"code,omitempty"`
+	Setup                 *providerSetup `json:"setup,omitempty"`
+	AccountUsageAvailable bool           `json:"account_usage_available,omitempty"`
 }
 
 // AllProvidersReport is the providers-webhook payload rendered by the Settings
@@ -518,8 +521,8 @@ func (p *plugin) configuredList(ctx context.Context, key string) []string {
 
 // collectProviders probes codexbar, then queries each provider and partitions
 // the result into usable utilization vs unavailable providers. When codexbar
-// itself can't run, it degrades to a status-only report so the page can render
-// setup guidance.
+// itself can't run, it still tries providers with an independent integration
+// before returning the degraded report and setup guidance.
 func (p *plugin) collectProviders(ctx context.Context) *AllProvidersReport {
 	cfg := p.config(ctx)
 	warn, high := p.configuredThresholds(ctx)
@@ -558,8 +561,11 @@ func (p *plugin) collectProviders(ctx context.Context) *AllProvidersReport {
 	cancelProbe()
 	report.Codexbar = status
 	if !status.Installed {
-		log.Printf("codexbar unavailable at %s stage (status-only report): %s — %s",
+		log.Printf("codexbar unavailable at %s stage (degraded report): %s — %s",
 			status.Stage, status.Error, status.Hint)
+		if err := p.enrichCursor(ctx, report); err != nil {
+			cursorUnavailable(report, err)
+		}
 		return report
 	}
 
@@ -573,13 +579,14 @@ func (p *plugin) collectProviders(ctx context.Context) *AllProvidersReport {
 			report.Providers = append(report.Providers, *u)
 		}
 	}
+	p.addCopilotSetup(ctx, cmd, report)
 	// The two independent APIs share the report deadline, not each other's
 	// latency. Keep their mutable reports separate until both have completed.
 	var augment AllProvidersReport
 	var extras sync.WaitGroup
 	extras.Add(1)
 	go func() { defer extras.Done(); p.appendAugment(ctx, &augment) }()
-	p.enrichCursor(ctx, report)
+	_ = p.enrichCursor(ctx, report)
 	extras.Wait()
 	report.Providers = append(report.Providers, augment.Providers...)
 	report.Unavailable = append(report.Unavailable, augment.Unavailable...)
@@ -600,9 +607,9 @@ func (p *plugin) cursorUsage(ctx context.Context, base *ProviderUsage) (*Provide
 	return usage, err
 }
 
-func (p *plugin) enrichCursor(ctx context.Context, report *AllProvidersReport) {
+func (p *plugin) enrichCursor(ctx context.Context, report *AllProvidersReport) error {
 	if p.cursor == nil || providerDisabled(p.config(ctx), "cursor") {
-		return
+		return nil
 	}
 	for i := range report.Providers {
 		if report.Providers[i].Provider != "cursor" {
@@ -618,7 +625,7 @@ func (p *plugin) enrichCursor(ctx context.Context, report *AllProvidersReport) {
 				report.Providers[i].DetailWarning = err.Error()
 			}
 		}
-		return
+		return nil
 	}
 	// A local Cursor session can also provide the report when the CLI's Cursor
 	// strategy failed. Respect the operator's provider allowlist.
@@ -628,7 +635,7 @@ func (p *plugin) enrichCursor(ctx context.Context, report *AllProvidersReport) {
 		pollCursor = pollCursor || provider == "cursor"
 	}
 	if !pollCursor {
-		return
+		return nil
 	}
 	if usage, err := p.cursorUsage(ctx, nil); err == nil {
 		report.Providers = append(report.Providers, *usage)
@@ -643,25 +650,35 @@ func (p *plugin) enrichCursor(ctx context.Context, report *AllProvidersReport) {
 		var selectedTeam *cursorTeamSelectionError
 		if errors.As(err, &selectedTeam) {
 			cursorUnavailable(report, err)
+			return nil
 		}
+		return err
 	}
+	return nil
 }
 
 func cursorUnavailable(report *AllProvidersReport, err error) {
+	failure := ProviderError{Provider: "cursor", Message: err.Error()}
+	var selected *cursorTeamSelectionError
+	if errors.As(err, &selected) {
+		failure.Code = "cursor_team_lookup"
+	}
 	providers := report.Providers[:0]
 	for _, usage := range report.Providers {
 		if usage.Provider != "cursor" {
 			providers = append(providers, usage)
+		} else {
+			failure.AccountUsageAvailable = true
 		}
 	}
 	report.Providers = providers
 	for i := range report.Unavailable {
 		if report.Unavailable[i].Provider == "cursor" {
-			report.Unavailable[i].Message = err.Error()
+			report.Unavailable[i] = failure
 			return
 		}
 	}
-	report.Unavailable = append(report.Unavailable, ProviderError{Provider: "cursor", Message: err.Error()})
+	report.Unavailable = append(report.Unavailable, failure)
 }
 
 // appendAugment adds Augment usage to the report when an Augment Analytics token

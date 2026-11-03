@@ -3,6 +3,7 @@ module kandev-plugin-provider-usage
 go 1.26.0
 
 require (
+	github.com/ebitengine/purego v0.11.3
 	github.com/kandev/kandev v0.0.0-00010101000000-000000000000
 	github.com/stretchr/testify v1.11.1
 	modernc.org/sqlite v1.58.0

@@ -1,5 +1,71 @@
 # Changelog
 
+## [0.11.0] - 2026-11-03
+
+### Changed
+
+- Fix Cursor team authentication and Copilot setup guidance (#35) (86ae157)
+
+
+## [0.10.1] - 2026-11-03
+
+### Fixed
+
+- Read encrypted macOS Cursor Desktop sessions through optional, noninteractive Safe Storage access.
+- Preserve selected-team boundaries and permit explicit account-mode recovery after team lookup errors.
+- Show Copilot authorization commands for the effective CLI, with upgrade guidance for unsupported versions.
+- Update managed macOS/Linux CodexBar to 0.83.0 with verified official asset checksums.
+
+## [0.10.0] - 2026-10-05
+
+### Changed
+
+- feat: use host Action for provider usage topbar (#30) (66269a7)
+
+
+## [0.9.5] - 2026-09-30
+
+### Changed
+
+- Include release archive hashes in checksums (#33) (623c0d0)
+
+
+## [0.9.4] - 2026-09-30
+
+### Changed
+
+- Show Codex reserve and deficit percentages (#32) (574e3f8)
+
+
+## [0.9.3] - 2026-09-17
+
+### Changed
+
+- Use Cursor Agent CLI authentication (#28) (3615180)
+
+
+## [0.9.2] - 2026-09-17
+
+### Changed
+
+- Keep Cursor usage available without CodexBar (#27) (698b31d)
+
+
+## [0.9.1] - 2026-09-16
+
+### Changed
+
+- Fix Cursor team usage and improve pace details (#26) (2ce5529)
+
+
+## [0.9.0] - 2026-09-16
+
+### Changed
+
+- Add provider settings, named Cursor teams, and detailed usage (#25) (39a6f8d)
+- feat: add managed CodexBar CLI updates (6412dbc)
+
+
 ## [0.8.0] - 2026-09-14
 
 ### Changed

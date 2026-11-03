@@ -62,6 +62,9 @@ a projected month-end total:
   (Home/Kanban, Tasks, and Threads) and the existing `chat-top-bar` plugin slot
   (kandev ≥ [#1827](https://github.com/kdlbs/kandev/pull/1827)) — a pill for
   your selected provider (icon + %), each real brand mark rendered monochrome.
+  Hosts that expose `host.ui.Action` render its icon and percentage in the
+  host-owned toolbar control; older hosts keep the existing `host.ui.Button`
+  pill. Both paths use the same selected provider and click behavior.
   Hover to open a panel that cycles through every provider; click to switch,
   and the selected tab is remembered locally.
   The shared bar has no task or active session: it reads the same account-wide
@@ -76,16 +79,34 @@ a projected month-end total:
   pill. It adapts to the host's 24 px desktop/tablet bar and its phone Status
   drawer. It is global provider/account usage only; session IDs only help
   resolve `current`.
+- The Action migration covers the single selected-provider top-bar trigger.
+  The optional status bar stays a read-only multi-provider strip with reset
+  details and a phone drawer. The trigger continues to open the existing
+  provider panel; its rich content is not rendered inside the Action.
 - Each provider's panel shows its rate-limit windows as thin bars (calm indigo
   normally, warming to amber/coral only when high — never a hard red), a
   reset countdown, plan/source badges, and codexbar's pace summary
-  ("48% in reserve").
+  ("48% in reserve"). Copilot labels its primary window Premium interactions;
+  when CodexBar omits pace but supplies its monthly reset, the plugin derives
+  reserve or deficit against linear calendar-month consumption.
+- **Codex pace**: each quota shows "X% in reserve", "X% in deficit", or
+  "On pace". When CodexBar omits the summary, the plugin compares percentage
+  used with percentage of the reported window elapsed at the usage snapshot.
+  Reserve means usage is below that pace; deficit means it is above.
+  This is distinct from the quota remaining. The phone Status drawer shows
+  pace for its displayed quota, too. Derived pace stays hidden when the
+  usage percentage, duration, or reset is unknown, the window has expired,
+  or less than 3% has elapsed. Scoped extra quotas use their own window data.
 - **Cursor details**: Total, Auto and API usage show the percentage used, with
   bars that fill as usage increases, reset times and extra spend.
   The backend supplements CodexBar with Cursor's dashboard endpoints,
   including Enterprise request allowances and personal spending
   caps. Missing metrics say "Not reported"; a failed optional lookup keeps
   the available quota visible. Shared team spend is explicitly labelled.
+  When Cursor reports only `overallSpendCents`, it is shown as Total spend
+  rather than being mislabeled as on-demand Extra Usage. Token-based Enterprise
+  teams also show total spend against the effective member limit as a usage bar,
+  with reserve or deficit calculated from the team's reported billing cycle.
 - **Codex manual resets**: the provider panel and phone Status drawer show
   available reset credits separately from the scheduled quota countdowns.
   A compact summary shows the available count and nearest expiry. Click, tap,
@@ -108,8 +129,9 @@ a projected month-end total:
   **Refresh** rebuilds the snapshot. Each refresh tries codexbar's fast `oauth`
   source first, falling back to the agent CLI only when needed.
 - **Local sign-in**: OAuth providers reuse credentials on the machine running
-  Kandev (`~/.claude`, `~/.codex`, …). Cursor can use its app session or a
-  configured dashboard cookie; Augment uses an Analytics token.
+  Kandev (`~/.claude`, `~/.codex`, …). Cursor can use its Desktop session,
+  Cursor Agent CLI login, or a configured dashboard cookie; Augment uses an
+  Analytics token.
 
 ## codexbar distribution
 
@@ -177,7 +199,7 @@ freshness, plus setup guidance and expandable diagnostics for unavailable usage.
 Each section retains its **Show usage** switch and provider controls. Cursor's
 named team picker and session cookie live inside **Cursor**. Augment's token,
 email, budget and plan unit live inside **Augment**, when detected or configured.
-The remaining providers reuse their existing local sign-in. Paused connections
+Copilot requires separate CodexBar authorization, described below. Paused connections
 retain their section so they can be enabled again.
 
 **Shared settings** holds the refresh interval and status-bar presentation.
@@ -197,7 +219,9 @@ Configuration keys (retained for compatibility with existing installations):
 | `augment_email`             | Your Augment org email, used to filter Analytics to your usage.                                             |
 | `augment_monthly_budget`    | Budget for the used-of-budget %. Empty = a per-user Analytics override, else a 2,500,000-credit default.   |
 | `augment_resource`          | `credits` (default) or `usd` — which metric your Augment plan bills.                                        |
-| `cursor_cookie_header`      | Optional Cursor dashboard Cookie request header, stored as a secret. Overrides automatic detail authentication; must match the account shown by CodexBar. Useful for a remote Kandev host. |
+| `cursor_cookie_header`      | Optional Cursor dashboard Cookie request header, stored as a secret. Overrides automatic Desktop and Agent CLI authentication; must match the account shown by CodexBar. Useful for a remote Kandev host. |
+| `cursor_agent_keychain`     | `off` (default) or `on`. On macOS, opt in to reading the access token saved by `agent login`; Keychain may ask once. Linux and Windows Agent auth files are read automatically. |
+| `cursor_desktop_keychain`   | `off` (default) or `on`. On macOS, permit noninteractive access to `Cursor Safe Storage` / `Cursor` for encrypted Desktop sessions. This setting is independent of Agent CLI Keychain. |
 | `codexbar_command`          | Explicit codexbar command. Empty = auto-detect / auto-download.                                             |
 | `codexbar_poll_minutes`     | Background refresh interval (default 5, minimum 1).                                                          |
 | `codexbar_providers`        | Comma-separated provider ids to poll. Empty = curated local-credential set; `"all"` = full sweep (slower).  |
@@ -228,6 +252,33 @@ could be resolved (download blocked, unsupported platform, checksum mismatch),
 the next step to take. The same reason also appears in the hover panel, so a
 blank pill explains itself without a trip to Settings.
 
+### Copilot authorization
+
+Copilot CLI sign-in and CodexBar authorization are separate. An installed Copilot
+CLI does not prove that CodexBar can read usage.
+
+If Copilot needs authorization, expand **GitHub Copilot** in the plugin settings.
+Use the command in that section. The command targets the effective CLI, including
+a managed executable outside PATH. The plugin checks command support through
+read-only CLI help. Older or unsupported CLIs show upgrade instructions.
+
+For a supported installation on PATH, the command is:
+
+```sh
+codexbar config login --provider copilot
+```
+
+1. Run the displayed command on the machine that runs Kandev.
+2. Use the same operating-system user and CodexBar environment as Kandev, including `CODEXBAR_CONFIG` or `XDG_CONFIG_HOME` overrides.
+3. Complete GitHub's device authorization.
+4. Click **Refresh usage**.
+
+The plugin confirms recovery from returned usage. It does not start authorization
+during background polling. Service, network, and unsupported-source errors retain
+their diagnostics. No plugin reinstall is necessary after authorization.
+
+See the [CodexBar device-login documentation](https://github.com/steipete/CodexBar/blob/v0.83.0/docs/cli-configuration.md#copilot-device-login).
+
 ### Cursor setup and data
 
 ![Cursor usage details showing Total, Auto and API percentage used and extra spend](docs/screenshots/cursor-details-light.png)
@@ -241,6 +292,18 @@ your allowlist. The Cursor panel always preserves the CLI's Total, Auto and API
 windows when available. Its compact pill uses Total Usage; a narrower exhausted
 API allowance is shown as "Limit reached" in the panel.
 
+**Daily Usage** shows today's reported usage cost in USD, from midnight UTC
+through the latest refresh, in both the provider panel and phone Status drawer.
+It sums Cursor's paginated dashboard events, preferring `chargedCents` (which
+already includes Cursor fees), or `tokenUsage.totalCents` plus `cursorTokenFee`
+when the charged amount is absent. Reported plan-covered costs are included;
+this is not necessarily an additional bill. The label explicitly says **Today · UTC**.
+Selected-team requests filter to that team and your member ID. Missing costs,
+failed or incomplete history, and unavailable member identity show **Not reported**;
+an explicitly empty day shows **$0.00**. Fetches are limited to 2,000 events and
+five seconds, and yesterday's cached amount is hidden after midnight UTC.
+The existing refresh interval also applies to Daily Usage.
+
 If you belong to multiple Cursor teams, expand **Cursor** in
 Settings → Plugins → Provider Usage, choose a **Team** by name and click
 **Save team**. **Reload teams** refreshes the list from your signed-in account.
@@ -249,6 +312,16 @@ shows the selected team's name and ID. The plugin checks the session's team
 memberships, requests that team's spending data, and selects your member row.
 A failed team lookup reports an error; it never falls back to CodexBar's
 unscoped quota or to the first team in the list.
+
+Account usage can succeed while authentication for the selected team lookup
+fails. This error does not prove that Cursor Desktop is signed out. The error
+details distinguish encrypted storage, denied access, rejected sessions, and
+unavailable teams where the evidence permits.
+
+If team enumeration fails, choose **Account usage (automatic)** and click
+**Save team** to use account-wide usage. If the request fails before the saved
+selection returns, use **Save account usage (automatic)**. Both actions explicitly
+change the saved scope. The plugin does not change the selection after an error.
 
 With a team selected, included requests use that member's reported request
 count and the selected team's per-seat allowance. Extra Usage shows your
@@ -273,12 +346,38 @@ resolved on the machine running the plugin, in this order:
    `~/.codexbar/config.json`. An explicit `cookieSource: "off"` disables
    automatic details; an empty/invalid manual cookie does not select another
    account.
-3. Cursor's local `User/globalStorage/state.vscdb`: under
+3. Cursor Agent CLI's explicit `CURSOR_AUTH_TOKEN`, when inherited by the
+   plugin process.
+4. Cursor Desktop's local `User/globalStorage/state.vscdb`: under
    `~/Library/Application Support/Cursor` on macOS, `$XDG_CONFIG_HOME/Cursor`
    (default `~/.config/Cursor`) on Linux, or `%APPDATA%\Cursor` on Windows.
+5. The session saved by `agent login`: when **Cursor · Agent CLI Keychain** is
+   enabled, the `cursor-access-token` item for account `cursor-user` in macOS
+   login Keychain;
+   `$XDG_CONFIG_HOME/cursor/auth.json` (default `~/.config/cursor/auth.json`)
+   on Linux, or `%APPDATA%\Cursor\auth.json` on Windows. A macOS Agent
+   configured with `AGENT_CLI_CREDENTIAL_STORE=file` uses
+   `~/.cursor/auth.json`.
 
-Cursor detail authentication does not read macOS Keychain. If the local app
-session is unavailable, set **Cursor · Session cookie** to enable the details.
+With both automatic local sessions available, the plugin tries Desktop first.
+Agent CLI remains a fallback after session rejection, with the existing account
+identity checks. Explicit cookie and token overrides remain authoritative.
+
+Encrypted macOS Desktop tokens require **Cursor · Desktop Safe Storage**.
+Save this setting before you reload teams. This setting permits read-only access
+to the `Cursor Safe Storage` service in Keychain. The plugin tries the `Cursor Key`
+account, then the legacy `Cursor` account only if the first item is absent.
+Denied or unavailable access stops the lookup. The plugin disables interaction
+before the lookup and limits each helper to five seconds.
+Background reads never prompt. A locked, denied, or unavailable Keychain produces
+an actionable error. Use **Cursor · Session cookie** as an alternative, or
+explicitly save **Account usage (automatic)** to retain available CodexBar usage.
+
+**Cursor · Agent CLI Keychain** controls the separate `cursor-access-token`
+credential. Its existing opt-in access policy remains unchanged. It does not
+decrypt Desktop tokens. Plain Desktop JWTs and Linux/Windows Agent auth files
+remain automatic. Encrypted Desktop storage on other platforms reports an
+unsupported-storage error.
 
 For a remote host, sign into `cursor.com` in your browser, open DevTools →
 Network, select a dashboard request and copy its **Cookie** request header into
@@ -287,10 +386,11 @@ are reused, so no duplicate configuration is needed. Credentials stay in the
 backend and are never sent to the plugin UI. The account identity is checked
 before combining dashboard data with CodexBar's quota.
 
-The plugin reads the local Cursor session without modifying its database or
-refreshing tokens in place. Keep Cursor signed in; renew a manually supplied
-cookie when it expires. A setup/authentication problem appears beneath the
-available Cursor quota.
+The plugin reads local Cursor sessions without modifying their database,
+credential file or Keychain item, and it never reads the Agent CLI refresh
+token. Keep Cursor Desktop or Agent CLI signed in; run `agent login` again or
+renew a manually supplied cookie when it expires. A setup/authentication
+problem appears beneath the available Cursor quota.
 
 Cursor account types expose different fields. Enterprise request allowances
 remain the Total Usage metric, with Auto/API percentages added separately when
@@ -299,7 +399,7 @@ including a reported personal zero. Shared allowances/spend are labelled as
 team data. Dollar values from the dashboard are converted from cents once.
 
 Sources: [OpenUsage's Cursor integration](https://github.com/robinebers/openusage/blob/main/docs/providers/cursor.md)
-and [CodexBar's Cursor provider](https://github.com/steipete/CodexBar/blob/v0.45.2/docs/cursor.md).
+and [CodexBar's Cursor provider](https://github.com/steipete/CodexBar/blob/v0.83.0/docs/cursor.md).
 The integration uses `/api/usage-summary`, `/api/usage`,
 and `DashboardService/GetCurrentPeriodUsage`. Failed
 optional endpoints do not discard working provider data.
@@ -327,16 +427,40 @@ It does not assume that the account summary or RPC accepts a team query paramete
 
 ## Develop
 
-Requires a sibling checkout of the kandev monorepo at `../kandev` (see the
-`replace` directive in `go.mod`).
+Use Go 1.26.0 and Node 24. The Node tests use built-in modules and need no npm
+dependencies. `.kandev-sdk-ref` pins the Kandev source used by the Go module
+replacement and the host Action contract. This source pin does not set the
+plugin's runtime minimum. The manifest remains API v1 and has no declared
+`min_kandev_version`; the UI selects the old Button when Action is absent.
+
+Create the sibling host checkout if needed, then set it to the pinned revision:
 
 ```sh
-make test           # Go + UI-bundle tests (codexbar/Augment calls are injected — no network needed)
-make vet
-go test -race ./server/...
-make package-host   # tarball for this machine only (fast iteration)
-make package        # tarball for all 5 supported platforms, including Apple Silicon
+if [ ! -d ../kandev/.git ]; then
+  git clone https://github.com/kdlbs/kandev.git ../kandev
+fi
+SDK_REF="$(cat .kandev-sdk-ref)"
+git -C ../kandev fetch origin "$SDK_REF"
+git -C ../kandev checkout --detach "$SDK_REF"
 ```
+
+Keep that checkout at the same revision while running the commands below.
+`plugin-pack` runs inside `../kandev/apps/backend` so it uses the SDK module's
+own dependency files.
+
+```sh
+make check-format
+go mod tidy
+git diff --exit-code -- go.mod go.sum
+make vet
+make test
+make build
+make verify-package-host
+make verify-package
+```
+
+For a disposable built-package check on a new Action host and the older Button
+fallback, follow [`test/host-smoke/README.md`](test/host-smoke/README.md).
 
 Install the tarball via **Settings → Plugins → Install plugin → Upload**.
 For filesystem sideloading, copy the archive directly into the running host's
@@ -348,7 +472,7 @@ the target platform's binary; `make package-host` on Linux cannot run on a Mac.
 The equivalent HTTP install, when the instance's authentication is disabled, is:
 
 ```sh
-curl -F package=@kandev-provider-usage-0.8.2.tar.gz \
+curl -F package=@kandev-provider-usage-0.11.0.tar.gz \
   http://localhost:8080/api/plugins/install
 ```
 
@@ -360,7 +484,9 @@ the host can preserve credentials and the selected Cursor team.
 ## Release
 
 In **Actions → release**, run the workflow from `main` and choose a
-patch, minor, or major bump. It commits the version update and generated
-`CHANGELOG.md` directly to `main`, tags that commit as `vX.Y.Z`, then verifies
-(`fmt`/`vet`/`test`), cross-compiles all platforms, and publishes the tarball +
-`checksums.txt` as a GitHub Release, which the kandev marketplace resolves.
+patch, minor, or major bump. The workflow serializes releases and checks the
+tag, manifest, Makefile and built package versions. It runs format, vet, test
+and package checks before it commits metadata or pushes a tag. Pushed tags run
+the same checks before the workflow publishes the archive and `checksums.txt`
+as a GitHub Release, which the Kandev marketplace resolves. The checksum file
+includes the archive's SHA-256 alongside its internal file hashes.

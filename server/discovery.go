@@ -73,6 +73,13 @@ func (s providerScanner) scan(cfg map[string]any) []detectedProvider {
 	if appData == "" {
 		appData = filepath.Join(s.home, "AppData", "Roaming")
 	}
+	cursorConfigDir := strings.TrimSpace(s.getenv("CURSOR_CONFIG_DIR"))
+	if cursorConfigDir == "" {
+		cursorConfigDir = filepath.Join(s.home, ".cursor")
+		if strings.TrimSpace(s.getenv("XDG_CONFIG_HOME")) != "" {
+			cursorConfigDir = filepath.Join(configHome, "cursor")
+		}
+	}
 	rules := []struct {
 		id       string
 		commands []string
@@ -87,6 +94,10 @@ func (s providerScanner) scan(cfg map[string]any) []detectedProvider {
 			filepath.Join(s.home, "Library", "Application Support", "Cursor", "User", "globalStorage", "state.vscdb"),
 			filepath.Join(configHome, "Cursor", "User", "globalStorage", "state.vscdb"),
 			filepath.Join(appData, "Cursor", "User", "globalStorage", "state.vscdb"),
+			filepath.Join(cursorConfigDir, "cli-config.json"),
+			filepath.Join(s.home, ".cursor", "auth.json"),
+			filepath.Join(configHome, "cursor", "auth.json"),
+			filepath.Join(appData, "Cursor", "auth.json"),
 		}},
 		{"grok", []string{"grok"}, nil},
 		{"opencodego", []string{"opencode"}, []string{filepath.Join(configHome, "opencode", "opencode.json"), filepath.Join(s.home, ".local", "share", "opencode", "auth.json")}},

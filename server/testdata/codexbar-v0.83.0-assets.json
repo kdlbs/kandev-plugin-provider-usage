@@ -1,0 +1,25 @@
+{
+  "release": "https://github.com/steipete/CodexBar/releases/tag/v0.83.0",
+  "assets": [
+    {
+      "platform": "linux-amd64",
+      "filename": "CodexBarCLI-v0.83.0-linux-musl-x86_64.tar.gz",
+      "sha256": "00e453ece6ee2efda9aecbd8a1c47f0eea6391ae1c8a922f019b9e466f809e53"
+    },
+    {
+      "platform": "linux-arm64",
+      "filename": "CodexBarCLI-v0.83.0-linux-musl-aarch64.tar.gz",
+      "sha256": "959ccce724a8945658e9a8ddbba1b9bf4abc42eeaea671a4bd0cc09270527178"
+    },
+    {
+      "platform": "darwin-amd64",
+      "filename": "CodexBarCLI-v0.83.0-macos-x86_64.tar.gz",
+      "sha256": "29e26cf8b0781bded65970028cccbf60c0ef5153a9a1ee3e5c65b00f489b61c7"
+    },
+    {
+      "platform": "darwin-arm64",
+      "filename": "CodexBarCLI-v0.83.0-macos-arm64.tar.gz",
+      "sha256": "3fb6af9582a0b232dc1708e1d8f13985441dbe2e74903791c902d1fa8bb7c4a9"
+    }
+  ]
+}
