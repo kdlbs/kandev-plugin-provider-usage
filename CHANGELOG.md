@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0] - 2026-11-03
+
+### Changed
+
+- Fix Cursor team authentication and Copilot setup guidance (#35) (86ae157)
+
+
 ## [0.10.1] - 2026-11-03
 
 ### Fixed
