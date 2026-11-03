@@ -295,6 +295,34 @@ func TestHandleWebhook_ProvidersAllSweep(t *testing.T) {
 	require.Len(t, report.Unavailable, 1)
 }
 
+func TestQueryProvidersClassifiesHardCommandFailures(t *testing.T) {
+	const notInstalled = "Provider not installed: Codex auth.json not found"
+	for _, tc := range []struct {
+		name      string
+		providers []string
+		provider  string
+		message   string
+		want      string
+	}{
+		{name: "all sweep auth failure", providers: nil, provider: providersAll, message: notInstalled, want: "not_configured"},
+		{name: "fast provider auth failure", providers: []string{"codex"}, provider: "codex", message: notInstalled, want: "not_configured"},
+		{name: "unknown failure remains unavailable", providers: []string{"codex"}, provider: "codex", message: "exit status 1", want: "provider_unavailable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := newPlugin()
+			p.run = func(context.Context, string, ...string) ([]byte, error) {
+				return nil, errors.New(tc.message)
+			}
+			report := &AllProvidersReport{}
+			p.queryProviders(context.Background(), resolvedCommand{Argv: []string{"codexbar"}}, tc.providers, report)
+			require.Len(t, report.Unavailable, 1)
+			require.Equal(t, tc.provider, report.Unavailable[0].Provider)
+			require.Equal(t, tc.want, report.Unavailable[0].Kind)
+			require.Contains(t, report.Unavailable[0].Message, tc.message)
+		})
+	}
+}
+
 func TestHandleWebhook_ProvidersDegradesWhenMissing(t *testing.T) {
 	run := func(context.Context, string, ...string) ([]byte, error) {
 		return nil, errors.New("exec: codexbar: not found")
@@ -800,6 +828,83 @@ func TestPollOnceDedupsWithinMaxAge(t *testing.T) {
 
 	p.pollOnce(ctx, 0)
 	require.Equal(t, int32(2), atomic.LoadInt32(&calls), "maxAge 0 forces a rebuild")
+}
+
+func TestPollOnceRetainsOrdinaryProviderFailure(t *testing.T) {
+	var fail atomic.Bool
+	p := newTestPlugin(t, codexbarConfig(map[string]any{"codexbar_providers": "claude"}), nil,
+		func(_ context.Context, _ string, args ...string) ([]byte, error) {
+			if len(args) > 0 && args[len(args)-1] == "--version" {
+				return []byte("CodexBar 0.45.2\n"), nil
+			}
+			if fail.Load() {
+				return nil, errors.New("temporary provider failure")
+			}
+			return []byte(sampleClaudeJSON), nil
+		})
+	first := p.pollOnce(context.Background(), 0)
+	require.Len(t, first.Providers, 1)
+	fail.Store(true)
+	second := p.pollOnce(context.Background(), 0)
+	require.Len(t, second.Providers, 1)
+	require.Equal(t, first.Providers[0], second.Providers[0])
+	require.Len(t, second.Unavailable, 1)
+	require.Equal(t, "claude", second.Unavailable[0].Provider)
+}
+
+func TestPollOnceRetainsReportWideFailure(t *testing.T) {
+	for _, failure := range []string{"sweep", "probe"} {
+		t.Run(failure, func(t *testing.T) {
+			var fail atomic.Bool
+			p := newTestPlugin(t, codexbarConfig(map[string]any{"codexbar_providers": "all"}), nil,
+				func(_ context.Context, _ string, args ...string) ([]byte, error) {
+					if len(args) > 0 && args[len(args)-1] == "--version" {
+						if fail.Load() && failure == "probe" {
+							return nil, errors.New("probe failed")
+						}
+						return []byte("CodexBar 0.45.2\n"), nil
+					}
+					if fail.Load() {
+						return nil, errors.New("sweep failed")
+					}
+					return []byte("[" + sampleClaudeInner() + "," + sampleCodexEntry + "]"), nil
+				})
+			first := p.pollOnce(context.Background(), 0)
+			require.Len(t, first.Providers, 2)
+			fail.Store(true)
+			second := p.pollOnce(context.Background(), 0)
+			require.Len(t, second.Providers, 2)
+			for _, id := range []string{"claude", "codex"} {
+				require.Condition(t, func() bool {
+					for _, item := range second.Unavailable {
+						if item.Provider == id && item.Kind == "provider_unavailable" {
+							return true
+						}
+					}
+					return false
+				})
+			}
+			projection := providerUsageProjection(second, p.now(), p.now(), "workspace")
+			require.True(t, projection["partial"].(bool))
+		})
+	}
+}
+
+func TestPollOnceDoesNotReviveAugmentAfterCredentialsRemoved(t *testing.T) {
+	config := codexbarConfig(map[string]any{"codexbar_providers": "all"})
+	p := newTestPlugin(t, config, nil, func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if len(args) > 0 && args[len(args)-1] == "--version" {
+			return nil, errors.New("probe failed")
+		}
+		return nil, errors.New("unreachable")
+	})
+	p.snapshot = &AllProvidersReport{Providers: []ProviderUsage{{Provider: "augment", Detail: "old budget"}, {Provider: "codex"}}}
+	report := p.pollOnce(context.Background(), 0)
+	require.Len(t, report.Providers, 1)
+	require.Equal(t, "codex", report.Providers[0].Provider)
+	for _, unavailable := range report.Unavailable {
+		require.NotEqual(t, "augment", unavailable.Provider)
+	}
 }
 
 func TestProviderErrMessage(t *testing.T) {

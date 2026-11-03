@@ -338,6 +338,19 @@ test("settings show Cursor warnings once while retaining other provider warnings
   app.unmount();
 });
 
+test("settings marks retained usage as a failed refresh", async () => {
+  const app = mount("plugin-settings");
+  const tree = await loadSettings(app, {
+    detected_providers: [{ provider: "claude", via: "cli" }],
+    providers: [{ provider: "claude", plan: "max", windows: [] }],
+    unavailable: [{ provider: "claude", message: "expired sign-in" }],
+  });
+  const section = nodes(tree, n => n.props["data-provider-settings"] === "claude")[0];
+  assert.match(text(section), /Refresh failed/);
+  assert.doesNotMatch(text(section), /Connected/);
+  app.unmount();
+});
+
 test("settings reports save failures without losing drafts, and permits discarding them", async () => {
   const app = mount("plugin-settings");
   let tree = await loadSettings(app, snapshot);

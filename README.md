@@ -53,6 +53,25 @@ a projected month-end total:
 
 ## What it does
 
+### MCP agent tool
+
+The plugin exposes the read-only MCP tool
+`kandev_kandev_provider_usage_get_provider_usage` on Kanban and Office task
+surfaces. It returns the existing instance-wide, non-user-scoped background
+snapshot; Kandev supplies the invocation workspace identity and callers cannot
+select a workspace, account, session, or credential.
+
+Calls never run codexbar or contact provider APIs. They return cached telemetry
+with generation time, age, and a stale flag (at twice the configured polling
+interval); before the first poll, the tool returns a well-formed partial
+response. Availability values distinguish available, quota exhaustion, stale
+telemetry, unavailable providers, missing configuration, unsupported providers,
+and unknown errors. The structured result contains only normalized metadata and
+never raw provider errors, account identifiers, or credentials.
+
+Coordinators should poll no more frequently than the configured interval. Use
+the UI Refresh action when a fresh provider read is needed.
+
 - **Provider settings**: one section per detected provider, with connection
   status, plan/team and usage summaries, quota resets, source and freshness.
   Local discovery loads independently of remote usage, so slow providers do

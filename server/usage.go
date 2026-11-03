@@ -24,9 +24,17 @@ type UtilizationWindow struct {
 	// can exclude it from the at-a-glance peak while still listing it.
 	Scoped bool   `json:"scoped,omitempty"`
 	Detail string `json:"detail,omitempty"` // e.g. included requests or a shared team allowance
+	// WindowSeconds retains the source duration for the MCP routing projection.
+	WindowSeconds *int64 `json:"window_seconds,omitempty"`
 	// Keep Codex pace with its window: omitted primary/secondary slots are
 	// removed from Windows, so array indices cannot identify their pace sides.
 	Pace *Pace `json:"pace,omitempty"`
+	// sourceSlot keeps a primary/secondary/tertiary identity after absent
+	// source windows have been removed from the display slice.
+	sourceSlot *int
+	// Extra windows keep their adapter ID even if their display title changes.
+	sourceExtraID string
+	sourceExtraAt *int
 }
 
 // Pace carries codexbar's optional burn-rate summary for a window ("52% in
@@ -392,6 +400,8 @@ func (u *cbUsage) windows(provider string) []UtilizationWindow {
 			continue
 		}
 		window := w.toWindow(defaultWindowLabel(i, w.WindowMinutes))
+		slot := i
+		window.sourceSlot = &slot
 		switch provider {
 		case "cursor":
 			window.Label = []string{"Total Usage", "Auto Usage", "API Usage"}[i]
@@ -401,7 +411,7 @@ func (u *cbUsage) windows(provider string) []UtilizationWindow {
 		}
 		out = append(out, window)
 	}
-	for _, ex := range u.Extra {
+	for i, ex := range u.Extra {
 		if ex.Window == nil {
 			continue
 		}
@@ -414,17 +424,26 @@ func (u *cbUsage) windows(provider string) []UtilizationWindow {
 		}
 		w := ex.Window.toWindow(label)
 		w.Scoped = true
+		w.sourceExtraID = ex.ID
+		extraAt := i
+		w.sourceExtraAt = &extraAt
 		out = append(out, w)
 	}
 	return out
 }
 
 func (w *cbWindow) toWindow(label string) UtilizationWindow {
+	var seconds *int64
+	if w.WindowMinutes > 0 {
+		value := int64(w.WindowMinutes) * 60
+		seconds = &value
+	}
 	return UtilizationWindow{
 		Label:            label,
 		UtilizationPct:   w.UsedPercent,
 		ResetAt:          parseTimeOr(w.ResetsAt, time.Time{}),
 		ResetDescription: w.ResetDescription,
+		WindowSeconds:    seconds,
 	}
 }
 

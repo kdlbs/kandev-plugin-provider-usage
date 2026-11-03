@@ -1884,6 +1884,7 @@ function settingsUpdated(at) {
 function settingsConnection(provider, usage, failure, enabled, pending, config) {
   var id = provider.provider, name = providerLabel(id);
   if (!enabled) return { label: "Paused", tone: "neutral", summary: "Usage is paused", hint: "Enable Show usage to include this provider in your usage displays." };
+  if (usage && failure) return { label: "Refresh failed", tone: "warning", summary: "Showing earlier usage", hint: "The latest refresh failed. Check the connection details below and refresh again." };
   if (usage) return { label: "Connected", tone: "good", summary: settingsPlan(usage.plan) || settingsSource(usage.source) };
   if (id === "augment" && (!config.augment_api_token || !config.augment_email)) {
     return { label: "Needs setup", tone: "warning", summary: "Connect Augment Analytics", hint: "Add your Analytics API token and account email below to read monthly usage. You can also choose your plan unit and budget." };
