@@ -22,7 +22,7 @@ import (
 // auto-download path fetches. Pinned so the `usage --format json` shape can't
 // drift under us; bump deliberately after re-probing the output and refreshing
 // the per-platform checksums below.
-const pinnedVersion = "0.45.2"
+const pinnedVersion = "0.83.0"
 
 // winPinnedVersion is the Win-CodexBar release the Windows path fetches. It is
 // versioned separately because that port cuts its own releases and skips
@@ -54,10 +54,10 @@ type platformAsset struct {
 // upstream codexbar; Windows has no upstream build, so it comes from
 // Win-CodexBar, a third-party port that publishes a compatible CLI.
 var codexbarAssets = map[string]platformAsset{
-	"linux-amd64":  upstreamAsset("linux-musl-x86_64", "7397da556d6400e9c069953c89e6bdbbc41b82d1ddd8b1fe6af576bef9f98487"),
-	"linux-arm64":  upstreamAsset("linux-musl-aarch64", "b209659765da51aaad471ffa194d808e85ca8f59c4b68be86e9045ea5c10bae0"),
-	"darwin-amd64": upstreamAsset("macos-x86_64", "fb433b69f91b1459a6be2f1c630814eb71f84e9e63ed28bce0e56a3bea6feb5a"),
-	"darwin-arm64": upstreamAsset("macos-arm64", "df83f412016bbb70c3011ae2c38e36fc211c39cae7e4dc7c655b6c968622e7bc"),
+	"linux-amd64":  upstreamAsset("linux-musl-x86_64", "00e453ece6ee2efda9aecbd8a1c47f0eea6391ae1c8a922f019b9e466f809e53"),
+	"linux-arm64":  upstreamAsset("linux-musl-aarch64", "959ccce724a8945658e9a8ddbba1b9bf4abc42eeaea671a4bd0cc09270527178"),
+	"darwin-amd64": upstreamAsset("macos-x86_64", "29e26cf8b0781bded65970028cccbf60c0ef5153a9a1ee3e5c65b00f489b61c7"),
+	"darwin-arm64": upstreamAsset("macos-arm64", "3fb6af9582a0b232dc1708e1d8f13985441dbe2e74903791c902d1fa8bb7c4a9"),
 	"windows-amd64": {
 		version: winPinnedVersion,
 		suffix:  "windows-x64",

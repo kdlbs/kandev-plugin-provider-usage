@@ -19,6 +19,7 @@ import (
 
 const cursorCookieSetting = "cursor_cookie_header"
 const cursorAgentKeychainSetting = "cursor_agent_keychain"
+const cursorDesktopKeychainSetting = "cursor_desktop_keychain"
 const cursorDetailHint = "For Cursor details, sign in to Cursor Desktop or Cursor Agent CLI on this host, or set Cursor · Session cookie in plugin settings."
 
 const cursorAgentKeychainTimeout = 5 * time.Second
@@ -56,7 +57,11 @@ func loadCursorAuth(ctx context.Context, cfg map[string]any) (cursorAuth, error)
 	}
 
 	allowAgentKeychain := strings.EqualFold(trimmedString(cfg[cursorAgentKeychainSetting]), "on")
-	return loadAutomaticCursorAuth(ctx, runtime.GOOS, taskHome, os.Getenv, os.ReadFile, runCursorSecret, allowAgentKeychain)
+	var safeStorage cursorSafeStorageReader
+	if strings.EqualFold(trimmedString(cfg[cursorDesktopKeychainSetting]), "on") {
+		safeStorage = readCursorSafeStoragePassword
+	}
+	return loadAutomaticCursorAuth(ctx, runtime.GOOS, taskHome, os.Getenv, os.ReadFile, runCursorSecret, allowAgentKeychain, safeStorage)
 }
 
 func loadAutomaticCursorAuth(
@@ -66,6 +71,7 @@ func loadAutomaticCursorAuth(
 	readFile func(string) ([]byte, error),
 	run cursorSecretRunner,
 	allowAgentKeychain bool,
+	safeStorage cursorSafeStorageReader,
 ) (cursorAuth, error) {
 	// CURSOR_AUTH_TOKEN is the Agent CLI's explicit, supported bearer override.
 	// Treat it like the explicit cookie above: an invalid value must not silently
@@ -80,9 +86,12 @@ func loadAutomaticCursorAuth(
 
 	candidates := make([]cursorAuth, 0, 2)
 	path := cursorStateDBPath(platform, taskHome, getenv)
+	var desktopErr error
 	if token, err := readCursorAccessToken(ctx, path); err == nil && token != "" {
-		if auth, err := cursorBearerAuth(token); err == nil {
+		if auth, err := cursorDesktopAuth(ctx, platform, token, safeStorage); err == nil {
 			candidates = append(candidates, auth)
+		} else {
+			desktopErr = err
 		}
 	}
 	agentToken, agentFound, agentErr := readCursorAgentAccessToken(
@@ -104,6 +113,9 @@ func loadAutomaticCursorAuth(
 	}
 	if agentFound && agentErr != nil {
 		return cursorAuth{}, agentErr
+	}
+	if desktopErr != nil {
+		return cursorAuth{}, desktopErr
 	}
 	return cursorAuth{}, errors.New(cursorDetailHint)
 }
@@ -285,7 +297,9 @@ func readCursorAgentAccessToken(
 }
 
 func runCursorSecret(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, name, args...).Output()
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.WaitDelay = time.Second
+	return cmd.Output()
 }
 
 func readCursorAccessToken(ctx context.Context, path string) (string, error) {

@@ -29,6 +29,7 @@ type cursorTeamOption struct {
 type cursorTeamsReport struct {
 	Teams          []cursorTeamOption `json:"teams"`
 	SelectedTeamID string             `json:"selected_team_id"`
+	SelectionKnown bool               `json:"selection_known"`
 	Error          string             `json:"error,omitempty"`
 }
 
@@ -116,6 +117,7 @@ func (p *plugin) cursorTeamsWebhook(ctx context.Context, method string) *plugins
 	report := cursorTeamsReport{Teams: []cursorTeamOption{}}
 	cfg, err := p.cursorConfig(ctx)
 	if err == nil {
+		report.SelectionKnown = true
 		report.SelectedTeamID, _ = cfg[cursorTeamSetting].(string)
 		if p.cursor == nil {
 			err = errors.New("Cursor integration is unavailable.")

@@ -399,8 +399,11 @@ func (p *plugin) statusJSON(ctx context.Context, refresh bool) []byte {
 // support on this OS, ...), surfaced so the Settings page can list it as
 // unavailable rather than silently dropping it.
 type ProviderError struct {
-	Provider string `json:"provider"`
-	Message  string `json:"message"`
+	Provider              string         `json:"provider"`
+	Message               string         `json:"message"`
+	Code                  string         `json:"code,omitempty"`
+	Setup                 *providerSetup `json:"setup,omitempty"`
+	AccountUsageAvailable bool           `json:"account_usage_available,omitempty"`
 }
 
 // AllProvidersReport is the providers-webhook payload rendered by the Settings
@@ -576,6 +579,7 @@ func (p *plugin) collectProviders(ctx context.Context) *AllProvidersReport {
 			report.Providers = append(report.Providers, *u)
 		}
 	}
+	p.addCopilotSetup(ctx, cmd, report)
 	// The two independent APIs share the report deadline, not each other's
 	// latency. Keep their mutable reports separate until both have completed.
 	var augment AllProvidersReport
@@ -654,20 +658,27 @@ func (p *plugin) enrichCursor(ctx context.Context, report *AllProvidersReport) e
 }
 
 func cursorUnavailable(report *AllProvidersReport, err error) {
+	failure := ProviderError{Provider: "cursor", Message: err.Error()}
+	var selected *cursorTeamSelectionError
+	if errors.As(err, &selected) {
+		failure.Code = "cursor_team_lookup"
+	}
 	providers := report.Providers[:0]
 	for _, usage := range report.Providers {
 		if usage.Provider != "cursor" {
 			providers = append(providers, usage)
+		} else {
+			failure.AccountUsageAvailable = true
 		}
 	}
 	report.Providers = providers
 	for i := range report.Unavailable {
 		if report.Unavailable[i].Provider == "cursor" {
-			report.Unavailable[i].Message = err.Error()
+			report.Unavailable[i] = failure
 			return
 		}
 	}
-	report.Unavailable = append(report.Unavailable, ProviderError{Provider: "cursor", Message: err.Error()})
+	report.Unavailable = append(report.Unavailable, failure)
 }
 
 // appendAugment adds Augment usage to the report when an Augment Analytics token

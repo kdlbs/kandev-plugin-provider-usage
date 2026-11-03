@@ -19,6 +19,28 @@ Use the repository's local SDK checkout at the immutable revision in
 module. Set `NODE` to the selected Node executable if it is not on `PATH`, and
 use a task-owned `TMPDIR` for disposable builds.
 
+## Authentication recovery fixture
+
+`auth-recovery.mjs` renders the real bundle with React and a synthetic host API.
+It covers Copilot authorization guidance and Cursor selected-team recovery on
+desktop and phone viewports. It checks keyboard focus, explicit scope changes,
+44px action controls, and document width. It does not access provider accounts
+or exercise native macOS Keychain access.
+
+Install the browser dependencies into the ignored build directory:
+
+```sh
+npm install --prefix .build/browser-tools --no-save --package-lock=false \
+  esbuild@0.25.12 react@19.2.3 react-dom@19.2.3 @playwright/test@1.61.1
+.build/browser-tools/node_modules/.bin/playwright install chromium
+node test/host-smoke/auth-recovery.mjs
+```
+
+The script writes screenshots and a JSON result to `.build/auth-recovery/`.
+`BROWSER_DEPS_DIR` selects another dependency directory. `PLUGIN_UI_BUNDLE`
+selects a bundle from an extracted package. The phone viewport uses Chromium
+touch emulation at 390 × 844 CSS pixels. It is not a physical-device test.
+
 ## Disposable host and fixtures
 
 Build and verify the host-platform archive, then upload that exact archive in
