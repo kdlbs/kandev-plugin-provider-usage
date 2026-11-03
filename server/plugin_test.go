@@ -427,7 +427,11 @@ func TestSessionFallbackDoesNotWaitForPoll(t *testing.T) {
 		t.Error("session read waited behind the background poll")
 	}
 	p.pollMu.Unlock()
-	<-done
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("session read did not finish after the poll lock was released")
+	}
 }
 
 func TestSessionFallbackWaitIsCancellable(t *testing.T) {
@@ -451,10 +455,18 @@ func TestSessionFallbackWaitIsCancellable(t *testing.T) {
 		defer close(leaderDone)
 		p.sessionJSON(context.Background(), "task-1", "gemini-session", false)
 	}()
-	<-entered
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("provider lookup did not start")
+	}
 	defer func() {
 		close(release)
-		<-leaderDone
+		select {
+		case <-leaderDone:
+		case <-time.After(time.Second):
+			t.Error("provider lookup did not finish after release")
+		}
 	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	waiter := make(chan []byte, 1)
@@ -507,7 +519,21 @@ func TestCancelledSessionFallbackLeaderDoesNotFailLiveWaiters(t *testing.T) {
 	defer cancel()
 	leader := make(chan []byte, 1)
 	go func() { leader <- p.sessionJSON(leaderCtx, "task-1", "gemini-session", false) }()
-	<-entered
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("leader lookup did not start")
+	}
+	readResponse := func(label string, responses <-chan []byte) []byte {
+		t.Helper()
+		select {
+		case raw := <-responses:
+			return raw
+		case <-time.After(time.Second):
+			t.Fatalf("%s did not finish after leader cancellation", label)
+			return nil
+		}
+	}
 	responses := make(chan []byte, 2)
 	for range 2 {
 		ctx := &observedDoneContext{Context: context.Background(), observed: make(chan struct{})}
@@ -521,13 +547,13 @@ func TestCancelledSessionFallbackLeaderDoesNotFailLiveWaiters(t *testing.T) {
 	cancel()
 	for range 2 {
 		var report SessionUsageReport
-		require.NoError(t, json.Unmarshal(<-responses, &report))
+		require.NoError(t, json.Unmarshal(readResponse("live waiter", responses), &report))
 		require.Empty(t, report.Error)
 		require.NotNil(t, report.Usage)
 		require.Equal(t, 25.0, report.Usage.Windows[0].UtilizationPct)
 	}
 	var cancelled SessionUsageReport
-	require.NoError(t, json.Unmarshal(<-leader, &cancelled))
+	require.NoError(t, json.Unmarshal(readResponse("cancelled leader", leader), &cancelled))
 	require.Contains(t, cancelled.Error, "cancel")
 	require.EqualValues(t, 2, attempts.Load(), "live waiters must share one replacement query")
 }
@@ -572,7 +598,13 @@ func TestConcurrentSessionFallbacksShareOneQuery(t *testing.T) {
 		})
 	}
 	close(start)
-	workers.Wait()
+	done := make(chan struct{})
+	go func() { workers.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("concurrent session reads did not finish")
+	}
 	close(responses)
 	for raw := range responses {
 		var report SessionUsageReport
