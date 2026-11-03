@@ -91,6 +91,47 @@ func TestCursorSettingsListsNamedTeamsAndMigratesLegacySelection(t *testing.T) {
 	require.Equal(t, "private-cookie", effective[cursorCookieSetting])
 }
 
+func TestCursorSettingsCanClearSelectionWhenAuthenticationFails(t *testing.T) {
+	p, host := newCursorSettingsPlugin(t, codexbarConfig(map[string]any{cursorTeamSetting: cursorSelectedTeam}))
+	p.run = providerRunner(nil, map[string][]byte{
+		"cursor": []byte(cursorEnterpriseCLI),
+		"claude": []byte(`[{"provider":"claude","error":{"message":"Unrelated provider failure"}}]`),
+	})
+	p.cursor.auth = func(context.Context, map[string]any) (cursorAuth, error) {
+		return cursorAuth{}, errCursorSafeStorageDenied
+	}
+	response, err := p.HandleWebhook(context.Background(), webhookGet(webhookKeyCursorTeams, ""))
+	require.NoError(t, err)
+	require.EqualValues(t, http.StatusBadGateway, response.Status)
+	var report cursorTeamsReport
+	require.NoError(t, json.Unmarshal(response.Body, &report))
+	require.True(t, report.SelectionKnown)
+	require.Equal(t, cursorSelectedTeam, report.SelectedTeamID)
+	require.Contains(t, report.Error, "denied")
+
+	before := p.pollOnce(context.Background(), 0)
+	require.Empty(t, before.Providers, "unscoped CLI usage must not satisfy a saved team")
+	require.Equal(t, "claude", before.Unavailable[0].Provider, "exercise an unrelated failure before Cursor")
+	var cursorFailure *ProviderError
+	for i := range before.Unavailable {
+		if before.Unavailable[i].Provider == "cursor" {
+			cursorFailure = &before.Unavailable[i]
+			break
+		}
+	}
+	require.NotNil(t, cursorFailure)
+	require.True(t, cursorFailure.AccountUsageAvailable)
+	require.Equal(t, "cursor_team_lookup", cursorFailure.Code)
+
+	response = selectCursorTeam(t, p, `{"team_id":""}`)
+	require.EqualValues(t, http.StatusOK, response.Status)
+	require.Equal(t, "", host.state["team_id"])
+	after := p.pollOnce(context.Background(), 0)
+	require.Len(t, after.Providers, 1, "explicit account mode keeps successful CLI usage")
+	require.Empty(t, after.Providers[0].TeamID)
+	require.Contains(t, after.Providers[0].DetailWarning, "denied")
+}
+
 func TestCursorSettingsSavePersistsSelectionAndClearsCachedOtherTeam(t *testing.T) {
 	cfg := codexbarConfig(map[string]any{cursorTeamSetting: "30677936", "codexbar_providers": "cursor"})
 	p, host := newCursorSettingsPlugin(t, cfg)

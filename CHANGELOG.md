@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.11.0] - 2026-11-03
+
+### Changed
+
+- Fix Cursor team authentication and Copilot setup guidance (#35) (86ae157)
+
+
+## [0.10.1] - 2026-11-03
+
+### Fixed
+
+- Read encrypted macOS Cursor Desktop sessions through optional, noninteractive Safe Storage access.
+- Preserve selected-team boundaries and permit explicit account-mode recovery after team lookup errors.
+- Show Copilot authorization commands for the effective CLI, with upgrade guidance for unsupported versions.
+- Update managed macOS/Linux CodexBar to 0.83.0 with verified official asset checksums.
+
 ## [0.10.0] - 2026-10-05
 
 ### Changed

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
@@ -203,6 +204,25 @@ func TestProviderUsageProjectionPreservesHardFailureClassification(t *testing.T)
 	record := providers[0].(map[string]any)
 	require.Equal(t, "not_configured", record["availability_state"])
 	require.Equal(t, "not_configured", record["reason"].(map[string]any)["code"])
+}
+
+func TestCursorFailurePreservesRecoveryAndAgentClassification(t *testing.T) {
+	now := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	report := &AllProvidersReport{
+		GeneratedAt: now.Format(time.RFC3339),
+		Providers:   []ProviderUsage{{Provider: "cursor", FetchedAt: now}},
+		Unavailable: []ProviderError{{Provider: "cursor", Kind: "not_configured"}},
+	}
+	cursorUnavailable(report, &cursorTeamSelectionError{errors.New("network unavailable")})
+	require.Empty(t, report.Providers, "unverified selected-team usage must not be retained")
+	require.True(t, report.cursorVerificationFailed)
+	require.Len(t, report.Unavailable, 1)
+	failure := report.Unavailable[0]
+	require.Equal(t, "cursor_team_lookup", failure.Code)
+	require.True(t, failure.AccountUsageAvailable, "Settings must keep the explicit account-recovery option")
+	record := providerUsageProjection(report, now, now, "workspace")["providers"].([]any)[0].(map[string]any)
+	require.Equal(t, "provider_unavailable", record["availability_state"])
+	require.NotContains(t, record, "setup", "operator recovery details must not leak into agent telemetry")
 }
 
 func TestManifestConstrainsNestedWindowsAndReasons(t *testing.T) {

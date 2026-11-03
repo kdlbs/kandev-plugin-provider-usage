@@ -469,8 +469,11 @@ type ProviderError struct {
 	Provider string `json:"provider"`
 	// Kind is a stable adapter classification. The agent tool deliberately never
 	// exposes Message, which may contain upstream diagnostics or credentials.
-	Kind    string `json:"kind,omitempty"`
-	Message string `json:"message"`
+	Kind                  string         `json:"kind,omitempty"`
+	Message               string         `json:"message"`
+	Code                  string         `json:"code,omitempty"`
+	Setup                 *providerSetup `json:"setup,omitempty"`
+	AccountUsageAvailable bool           `json:"account_usage_available,omitempty"`
 }
 
 // AllProvidersReport is the providers-webhook payload rendered by the Settings
@@ -650,6 +653,7 @@ func (p *plugin) collectProviders(ctx context.Context) *AllProvidersReport {
 			report.Providers = append(report.Providers, *u)
 		}
 	}
+	p.addCopilotSetup(ctx, cmd, report)
 	// The two independent APIs share the report deadline, not each other's
 	// latency. Keep their mutable reports separate until both have completed.
 	var augment AllProvidersReport
@@ -728,24 +732,28 @@ func (p *plugin) enrichCursor(ctx context.Context, report *AllProvidersReport) e
 }
 
 func cursorUnavailable(report *AllProvidersReport, err error) {
-	var selectedTeam *cursorTeamSelectionError
-	if errors.As(err, &selectedTeam) {
+	failure := ProviderError{Provider: "cursor", Kind: classifyProviderError("", err.Error()), Message: err.Error()}
+	var selected *cursorTeamSelectionError
+	if errors.As(err, &selected) {
 		report.cursorVerificationFailed = true
+		failure.Code = "cursor_team_lookup"
 	}
 	providers := report.Providers[:0]
 	for _, usage := range report.Providers {
 		if usage.Provider != "cursor" {
 			providers = append(providers, usage)
+		} else {
+			failure.AccountUsageAvailable = true
 		}
 	}
 	report.Providers = providers
 	for i := range report.Unavailable {
 		if report.Unavailable[i].Provider == "cursor" {
-			report.Unavailable[i].Message = err.Error()
+			report.Unavailable[i] = failure
 			return
 		}
 	}
-	report.Unavailable = append(report.Unavailable, ProviderError{Provider: "cursor", Kind: classifyProviderError("", err.Error()), Message: err.Error()})
+	report.Unavailable = append(report.Unavailable, failure)
 }
 
 // classifyProviderError accepts only a small set of stable adapter kinds and

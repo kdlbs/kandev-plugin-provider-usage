@@ -1,0 +1,49 @@
+[
+  {
+    "provider": "cursor",
+    "source": "web",
+    "usage": {
+      "primary": {
+        "usedPercent": 20,
+        "windowMinutes": 43200,
+        "resetsAt": "2026-12-01T00:00:00Z"
+      },
+      "secondary": {
+        "usedPercent": 30
+      },
+      "tertiary": {
+        "usedPercent": 40
+      },
+      "identity": {
+        "providerID": "cursor",
+        "planName": "Business"
+      },
+      "updatedAt": "2026-11-03T12:00:00Z"
+    }
+  },
+  {
+    "provider": "copilot",
+    "source": "api",
+    "usage": {
+      "primary": {
+        "usedPercent": 12,
+        "windowMinutes": 43200,
+        "resetsAt": "2026-12-01T00:00:00Z"
+      },
+      "identity": {
+        "providerID": "copilot",
+        "planName": "Business"
+      },
+      "updatedAt": "2026-11-03T12:00:00Z"
+    }
+  },
+  {
+    "provider": "claude",
+    "source": "auto",
+    "error": {
+      "kind": "provider",
+      "message": "Synthetic provider error.",
+      "code": 1
+    }
+  }
+]

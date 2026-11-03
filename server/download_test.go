@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -105,9 +106,27 @@ func TestDownloaderEnsure_DownloadsVerifiesCaches(t *testing.T) {
 
 func TestLinuxAssetsUseStaticMuslBuilds(t *testing.T) {
 	require.Equal(t, "linux-musl-x86_64", codexbarAssets["linux-amd64"].suffix)
-	require.Equal(t, "7397da556d6400e9c069953c89e6bdbbc41b82d1ddd8b1fe6af576bef9f98487", codexbarAssets["linux-amd64"].sha256)
+	require.Equal(t, "00e453ece6ee2efda9aecbd8a1c47f0eea6391ae1c8a922f019b9e466f809e53", codexbarAssets["linux-amd64"].sha256)
 	require.Equal(t, "linux-musl-aarch64", codexbarAssets["linux-arm64"].suffix)
-	require.Equal(t, "b209659765da51aaad471ffa194d808e85ca8f59c4b68be86e9045ea5c10bae0", codexbarAssets["linux-arm64"].sha256)
+	require.Equal(t, "959ccce724a8945658e9a8ddbba1b9bf4abc42eeaea671a4bd0cc09270527178", codexbarAssets["linux-arm64"].sha256)
+}
+
+func TestPinnedUpstreamAssetsMatchOfficialSidecars(t *testing.T) {
+	// Fixture recorded from the official v0.83.0 release sidecars after
+	// downloading and hashing every managed macOS/Linux archive.
+	raw, err := os.ReadFile("testdata/codexbar-v0.83.0-assets.json")
+	require.NoError(t, err)
+	var fixture struct {
+		Assets []struct{ Platform, Filename, SHA256 string }
+	}
+	require.NoError(t, json.Unmarshal(raw, &fixture))
+	require.Len(t, fixture.Assets, 4)
+	for _, expected := range fixture.Assets {
+		asset := codexbarAssets[expected.Platform]
+		require.Equal(t, expected.SHA256, asset.sha256)
+		require.Equal(t, "0.83.0", asset.version)
+		require.Equal(t, "https://github.com/steipete/CodexBar/releases/download/v0.83.0/"+expected.Filename, asset.url)
+	}
 }
 
 func TestBinPathSeparatesArtifactsAtSameVersion(t *testing.T) {

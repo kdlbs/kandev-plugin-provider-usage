@@ -166,7 +166,7 @@ func TestCursorAutomaticAuthUsesAgentCLIAndRetainsDesktopFallback(t *testing.T) 
 	agentToken := cursorAuthFixtureFor("agent_user")
 	require.NoError(t, os.WriteFile(agentPath, []byte(`{"accessToken":"`+agentToken+`","refreshToken":"unused"}`), 0600))
 
-	auth, err := loadAutomaticCursorAuth(context.Background(), "linux", home, env, os.ReadFile, nil, false)
+	auth, err := loadAutomaticCursorAuth(context.Background(), "linux", home, env, os.ReadFile, nil, false, nil)
 	require.NoError(t, err)
 	require.Equal(t, "agent_user", auth.userID)
 	require.Empty(t, auth.alternates)
@@ -181,14 +181,14 @@ func TestCursorAutomaticAuthUsesAgentCLIAndRetainsDesktopFallback(t *testing.T) 
 	require.NoError(t, err)
 	require.NoError(t, db.Close())
 
-	auth, err = loadAutomaticCursorAuth(context.Background(), "linux", home, env, os.ReadFile, nil, false)
+	auth, err = loadAutomaticCursorAuth(context.Background(), "linux", home, env, os.ReadFile, nil, false, nil)
 	require.NoError(t, err)
 	require.Equal(t, "desktop_user", auth.userID)
 	require.Len(t, auth.alternates, 1)
 	require.Equal(t, "agent_user", auth.alternates[0].userID)
 
 	require.NoError(t, os.WriteFile(agentPath, []byte(`{"accessToken":"","refreshToken":"unused"}`), 0600))
-	auth, err = loadAutomaticCursorAuth(context.Background(), "linux", home, env, os.ReadFile, nil, false)
+	auth, err = loadAutomaticCursorAuth(context.Background(), "linux", home, env, os.ReadFile, nil, false, nil)
 	require.NoError(t, err, "a valid Desktop session remains usable")
 	require.Equal(t, "desktop_user", auth.userID)
 	require.Empty(t, auth.alternates)
@@ -203,7 +203,7 @@ func TestCursorAgentExplicitTokenDoesNotFallBack(t *testing.T) {
 		}
 		return ""
 	}
-	_, err := loadAutomaticCursorAuth(context.Background(), "linux", home, env, os.ReadFile, nil, false)
+	_, err := loadAutomaticCursorAuth(context.Background(), "linux", home, env, os.ReadFile, nil, false, nil)
 	require.ErrorContains(t, err, "CURSOR_AUTH_TOKEN is invalid")
 }
 
