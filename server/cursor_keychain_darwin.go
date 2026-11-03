@@ -36,23 +36,23 @@ func cursorSafeStorageHelperMain() int {
 	if noUI(0) != 0 {
 		return 3
 	}
-	const service, account = "Cursor Safe Storage", "Cursor"
-	var length uint32
-	var data unsafe.Pointer
-	status := find(0, uint32(len(service)), service, uint32(len(account)), account, &length, &data, 0)
-	if status != 0 {
-		switch status {
-		case -25308, -25293, -25243, -128: // interaction required, auth failed, no access, canceled
-			return 2
-		default:
-			return 3
+	password, exitCode := cursorSafeStorageKeychainPassword(func(service, account string) ([]byte, int32) {
+		var length uint32
+		var data unsafe.Pointer
+		status := find(0, uint32(len(service)), service, uint32(len(account)), account, &length, &data, 0)
+		if status != 0 {
+			return nil, status
 		}
+		defer free(0, data)
+		if data == nil || length == 0 || length > 4096 {
+			return nil, -25291 // unavailable
+		}
+		return append([]byte(nil), unsafe.Slice((*byte)(data), int(length))...), 0
+	})
+	if exitCode != 0 {
+		return exitCode
 	}
-	defer free(0, data)
-	if data == nil || length == 0 || length > 4096 {
-		return 3
-	}
-	if _, err := os.Stdout.Write(unsafe.Slice((*byte)(data), int(length))); err != nil {
+	if _, err := os.Stdout.Write(password); err != nil {
 		return 3
 	}
 	return 0

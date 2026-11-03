@@ -365,8 +365,10 @@ identity checks. Explicit cookie and token overrides remain authoritative.
 
 Encrypted macOS Desktop tokens require **Cursor · Desktop Safe Storage**.
 Save this setting before you reload teams. This setting permits read-only access
-to the `Cursor Safe Storage` service and `Cursor` account in Keychain. The plugin
-disables interaction before the lookup and limits each helper to five seconds.
+to the `Cursor Safe Storage` service in Keychain. The plugin tries the `Cursor Key`
+account, then the legacy `Cursor` account only if the first item is absent.
+Denied or unavailable access stops the lookup. The plugin disables interaction
+before the lookup and limits each helper to five seconds.
 Background reads never prompt. A locked, denied, or unavailable Keychain produces
 an actionable error. Use **Cursor · Session cookie** as an alternative, or
 explicitly save **Account usage (automatic)** to retain available CodexBar usage.

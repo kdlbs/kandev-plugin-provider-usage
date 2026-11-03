@@ -143,7 +143,7 @@ func (c *cursorClient) fetch(ctx context.Context, cfg map[string]any, base *Prov
 		lastErr = candidateErr
 	}
 	if alternateErr != nil {
-		return nil, alternateErr
+		return nil, errors.Join(lastErr, alternateErr)
 	}
 	return nil, lastErr
 }

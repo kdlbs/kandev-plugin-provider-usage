@@ -114,7 +114,7 @@ config_schema:
       default: "off"
       title: "Cursor · Desktop Safe Storage"
       description: >-
-        macOS only. Read Cursor Safe Storage / Cursor to decrypt Desktop sessions.
+        macOS only. Read Cursor Safe Storage from Cursor Key or the legacy Cursor account to decrypt Desktop sessions.
         Reads never prompt. If denied, use Session cookie or save Account usage (automatic).
         Separate from Agent CLI Keychain. Credentials remain in the backend.
 

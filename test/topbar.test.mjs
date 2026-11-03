@@ -820,7 +820,7 @@ test("Copilot service errors and Cursor team failures keep distinct recovery gui
   const app = mount("plugin-settings");
   const tree = await loadSettings(app, { providers: [], detected_providers: [{ provider: "copilot", via: "cli" }, { provider: "cursor", via: "app" }], unavailable: [
     { provider: "copilot", message: "HTTP 503 service unavailable" },
-    { provider: "cursor", code: "cursor_team_lookup", account_usage_available: true, message: "Cursor desktop session is encrypted." },
+    { provider: "cursor", code: "cursor_team_lookup", account_usage_available: true, message: "Cursor Agent CLI's saved session is invalid. Run agent login again." },
   ] });
   const copilot = nodes(tree, n => n.props["data-provider-settings"] === "copilot")[0];
   assert.match(text(copilot), /Usage could not be read/);
@@ -829,6 +829,10 @@ test("Copilot service errors and Cursor team failures keep distinct recovery gui
   const cursor = nodes(tree, n => n.props["data-provider-settings"] === "cursor")[0];
   assert.match(text(cursor), /Selected team lookup failed/);
   assert.match(text(cursor), /CodexBar returned account usage/);
+  assert.match(text(cursor), /For Desktop encryption on macOS, use Desktop Safe Storage/);
+  assert.match(text(cursor), /For Agent CLI sessions, run agent login on the Kandev host/);
+  assert.match(text(cursor), /enable Agent CLI Keychain on macOS if needed/);
+  assert.match(text(cursor), /Session cookie is an alternative/);
   assert.ok(settingsInput(cursor, "cursor_desktop_keychain"));
   app.unmount();
 });

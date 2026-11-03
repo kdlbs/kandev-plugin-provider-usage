@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,6 +54,45 @@ func TestCursorEncryptedSQLiteSession(t *testing.T) {
 	auth, err = loadAutomaticCursorAuth(context.Background(), "darwin", taskHome, empty, os.ReadFile, nil, false, nil)
 	require.NoError(t, err)
 	require.Equal(t, "user_test", auth.userID)
+
+	for _, scenario := range []struct {
+		name   string
+		reader cursorSafeStorageReader
+		want   string
+	}{
+		{"desktop disabled", nil, "Enable Desktop Safe Storage"},
+		{"desktop denied", func(context.Context) ([]byte, error) { return nil, errCursorSafeStorageDenied }, "denied"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			auth, err := loadAutomaticCursorAuth(context.Background(), "darwin", taskHome, empty, os.ReadFile, nil, false, scenario.reader)
+			require.NoError(t, err, "an Agent candidate remains usable")
+			require.ErrorContains(t, auth.alternateErr, scenario.want)
+			for _, status := range []int{http.StatusOK, http.StatusUnauthorized, http.StatusServiceUnavailable} {
+				c := cursorTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+					if status != http.StatusOK {
+						w.WriteHeader(status)
+						return
+					}
+					cursorFixtureHandler(nil)(w, r)
+				})
+				c.auth = func(context.Context, map[string]any) (cursorAuth, error) { return auth, nil }
+				usage, err := c.fetch(context.Background(), nil, cursorBase(t), cursorTestNow)
+				switch status {
+				case http.StatusOK:
+					require.NoError(t, err)
+					require.NotNil(t, usage)
+					require.Empty(t, usage.DetailWarning, "a working Agent session needs no Desktop warning")
+				case http.StatusUnauthorized:
+					require.Nil(t, usage)
+					require.ErrorIs(t, err, errCursorSessionRejected)
+					require.ErrorContains(t, err, scenario.want, "failed Agent fallback must retain Desktop recovery")
+				default:
+					require.Nil(t, usage)
+					require.ErrorContains(t, err, "HTTP 503", "service errors must retain their own diagnostics")
+				}
+			}
+		})
+	}
 }
 
 func TestCursorEncryptedStorageErrorsAreSafe(t *testing.T) {

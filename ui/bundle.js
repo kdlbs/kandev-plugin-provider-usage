@@ -1708,7 +1708,7 @@ var SETTINGS_SECRET_MASK = "********";
 var SETTINGS_FIELDS = {
   cursor_cookie_header: { label: "Session cookie", secret: true, hint: "Optional. Uses Cursor Desktop or Agent CLI automatically. For a remote host, save a cursor.com cookie here, then reload teams." },
   cursor_agent_keychain: { label: "Agent CLI Keychain", default: "off", options: [["off", "Off"], ["on", "Use on macOS"]], hint: "macOS only. Allows read-only access to the login saved by agent login; Keychain may ask once. Linux and Windows use the CLI auth file automatically." },
-  cursor_desktop_keychain: { label: "Desktop Safe Storage", default: "off", options: [["off", "Off"], ["on", "Use on macOS without prompts"]], hint: "macOS only. Read the Cursor Safe Storage / Cursor Keychain item to decrypt Desktop's session. Background reads never prompt. If access is denied or requires approval, use Session cookie or choose and save Account usage (automatic). Agent CLI Keychain controls a separate credential." },
+  cursor_desktop_keychain: { label: "Desktop Safe Storage", default: "off", options: [["off", "Off"], ["on", "Use on macOS without prompts"]], hint: "macOS only. Read Cursor Safe Storage from the Cursor Key or legacy Cursor account to decrypt Desktop's session. Background reads never prompt. If access is denied or requires approval, use Session cookie or choose and save Account usage (automatic). Agent CLI Keychain controls a separate credential." },
   augment_api_token: { label: "API token", secret: true, hint: "Analytics token from app.augmentcode.com/settings/personal-api-tokens." },
   augment_email: { label: "Account email", type: "email", hint: "Your Augment organization email." },
   augment_monthly_budget: { label: "Monthly budget", type: "number", min: 0, hint: "Leave empty to use the budget reported by Augment." },
@@ -1894,7 +1894,7 @@ function settingsConnection(provider, usage, failure, enabled, pending, config) 
       return { label: "Needs setup", tone: "warning", summary: "Authorize Copilot in CodexBar", hint: failure.setup && failure.setup.hint || "Copilot CLI sign-in and CodexBar authorization are separate. Update CodexBar, then refresh usage for setup instructions." };
     }
     if (id === "cursor" && failure.code === "cursor_team_lookup") {
-      return { label: "Team unavailable", tone: "warning", summary: "Selected team lookup failed", hint: (failure.account_usage_available ? "CodexBar returned account usage, but authentication or lookup for the selected team failed. " : "The selected team's usage could not be verified. ") + "Check Connection details below. Use Desktop Safe Storage on macOS or Session cookie, then reload teams. To use account-wide usage, choose and save Account usage (automatic) below." };
+      return { label: "Team unavailable", tone: "warning", summary: "Selected team lookup failed", hint: (failure.account_usage_available ? "CodexBar returned account usage, but authentication or lookup for the selected team failed. " : "The selected team's usage could not be verified. ") + "Check Connection details below for the affected credential source. For Desktop encryption on macOS, use Desktop Safe Storage. For Agent CLI sessions, run agent login on the Kandev host and enable Agent CLI Keychain on macOS if needed. Session cookie is an alternative. Then reload teams. To use account-wide usage, choose and save Account usage (automatic) below." };
     }
     var signIn = /unauthori[sz]ed|not signed|sign in|log.?in|expired|credential|\b401\b/i.test(failure.message || "");
     return {

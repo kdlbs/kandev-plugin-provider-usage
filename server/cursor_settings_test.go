@@ -93,6 +93,10 @@ func TestCursorSettingsListsNamedTeamsAndMigratesLegacySelection(t *testing.T) {
 
 func TestCursorSettingsCanClearSelectionWhenAuthenticationFails(t *testing.T) {
 	p, host := newCursorSettingsPlugin(t, codexbarConfig(map[string]any{cursorTeamSetting: cursorSelectedTeam}))
+	p.run = providerRunner(nil, map[string][]byte{
+		"cursor": []byte(cursorEnterpriseCLI),
+		"claude": []byte(`[{"provider":"claude","error":{"message":"Unrelated provider failure"}}]`),
+	})
 	p.cursor.auth = func(context.Context, map[string]any) (cursorAuth, error) {
 		return cursorAuth{}, errCursorSafeStorageDenied
 	}
@@ -107,8 +111,17 @@ func TestCursorSettingsCanClearSelectionWhenAuthenticationFails(t *testing.T) {
 
 	before := p.pollOnce(context.Background(), 0)
 	require.Empty(t, before.Providers, "unscoped CLI usage must not satisfy a saved team")
-	require.True(t, before.Unavailable[0].AccountUsageAvailable)
-	require.Equal(t, "cursor_team_lookup", before.Unavailable[0].Code)
+	require.Equal(t, "claude", before.Unavailable[0].Provider, "exercise an unrelated failure before Cursor")
+	var cursorFailure *ProviderError
+	for i := range before.Unavailable {
+		if before.Unavailable[i].Provider == "cursor" {
+			cursorFailure = &before.Unavailable[i]
+			break
+		}
+	}
+	require.NotNil(t, cursorFailure)
+	require.True(t, cursorFailure.AccountUsageAvailable)
+	require.Equal(t, "cursor_team_lookup", cursorFailure.Code)
 
 	response = selectCursorTeam(t, p, `{"team_id":""}`)
 	require.EqualValues(t, http.StatusOK, response.Status)

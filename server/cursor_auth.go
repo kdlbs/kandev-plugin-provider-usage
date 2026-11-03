@@ -106,9 +106,7 @@ func loadAutomaticCursorAuth(
 	}
 	if len(candidates) > 0 {
 		auth := combineCursorAuth(candidates)
-		if agentFound && agentErr != nil {
-			auth.alternateErr = agentErr
-		}
+		auth.alternateErr = errors.Join(desktopErr, agentErr)
 		return auth, nil
 	}
 	if agentFound && agentErr != nil {
