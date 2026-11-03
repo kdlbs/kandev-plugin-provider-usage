@@ -160,7 +160,9 @@ the UI Refresh action when a fresh provider read is needed.
   provider command on every hover. The first usage request after startup can
   wait for the initial poll; settings remain usable while it runs. An explicit
   **Refresh** rebuilds the snapshot. Providers outside the polled list, including
-  legacy Gemini sessions, are fetched on demand and cached until the next poll or refresh.
+  legacy Gemini sessions, use a separate session cache. A new background snapshot
+  invalidates that cache, including after a failed poll. Empty results stay empty;
+  they do not become provider failures in Settings or the agent tool.
   Each refresh tries codexbar's fast `oauth`
   source first, falling back to the agent CLI only when needed.
 - **Local sign-in**: OAuth providers reuse credentials on the machine running

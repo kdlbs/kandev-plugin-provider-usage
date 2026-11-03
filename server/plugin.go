@@ -113,11 +113,19 @@ type plugin struct {
 	pollMu           sync.Mutex
 	cursorSettingsMu sync.Mutex
 
-	// mu guards the snapshot pointer and its timestamp.
+	// mu guards the snapshot pointer, timestamp, and session fallback coordination.
 	mu                      sync.Mutex
 	snapshot                *AllProvidersReport
 	snapshotAt              time.Time
 	cursorSelectionRevision uint64
+	sessionFallbacks        map[string]*sessionFallback
+}
+
+type sessionFallback struct {
+	snapshot *AllProvidersReport
+	done     chan struct{}
+	usage    *ProviderUsage
+	errMsg   string
 }
 
 var _ pluginsdk.Plugin = (*plugin)(nil)
@@ -1005,34 +1013,43 @@ func (p *plugin) sessionJSON(ctx context.Context, taskID, activeSessionID string
 	return marshalOr(report, sessionEncodeErr)
 }
 
-// sessionUsageOnDemand extends the current snapshot with a provider outside the
-// polled set. The next poll or explicit refresh replaces this fallback too.
+// sessionUsageOnDemand shares a provider query independently of the poller.
+// Fallbacks belong to one background snapshot and never alter its telemetry.
 func (p *plugin) sessionUsageOnDemand(ctx context.Context, snap *AllProvidersReport, provider string) (*ProviderUsage, string) {
-	p.pollMu.Lock()
-	defer p.pollMu.Unlock()
-	if current, _ := p.currentSnapshot(); current != nil {
+	if err := ctx.Err(); err != nil {
+		return nil, err.Error()
+	}
+	p.mu.Lock()
+	if current := p.snapshot; current != nil {
 		snap = current
 	}
 	if usage, errMsg, found := sessionFromSnapshot(snap, provider); found {
+		p.mu.Unlock()
 		return usage, errMsg
 	}
-	usage, errMsg := p.fetchSessionUsage(ctx, provider)
-	if ctx.Err() == nil {
-		p.mu.Lock()
-		// A settings change may invalidate the snapshot during the query.
-		if p.snapshot == snap {
-			updated := *snap
-			if usage != nil {
-				updated.Providers = append(append([]ProviderUsage(nil), snap.Providers...), *usage)
-			} else {
-				updated.Unavailable = append(append([]ProviderError(nil), snap.Unavailable...), ProviderError{
-					Provider: provider, Kind: classifyProviderError("", errMsg), Message: errMsg,
-				})
-			}
-			p.snapshot = &updated
-		}
+	if entry := p.sessionFallbacks[provider]; entry != nil && entry.snapshot == snap {
 		p.mu.Unlock()
+		select {
+		case <-entry.done:
+			return entry.usage, entry.errMsg
+		case <-ctx.Done():
+			return nil, ctx.Err().Error()
+		}
 	}
+	entry := &sessionFallback{snapshot: snap, done: make(chan struct{})}
+	if p.sessionFallbacks == nil {
+		p.sessionFallbacks = make(map[string]*sessionFallback)
+	}
+	p.sessionFallbacks[provider] = entry
+	p.mu.Unlock()
+	usage, errMsg := p.fetchSessionUsage(ctx, provider)
+	p.mu.Lock()
+	entry.usage, entry.errMsg = usage, errMsg
+	if ctx.Err() != nil && p.sessionFallbacks[provider] == entry {
+		delete(p.sessionFallbacks, provider)
+	}
+	close(entry.done)
+	p.mu.Unlock()
 	return usage, errMsg
 }
 

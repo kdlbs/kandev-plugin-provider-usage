@@ -393,12 +393,104 @@ func TestSessionFallbackCachesGeminiUntilRefresh(t *testing.T) {
 			require.Equal(t, afterFirst, atomic.LoadInt32(&calls), "repeated hovers must reuse the fallback, including failures")
 			require.Equal(t, first.Usage, again.Usage)
 			require.Equal(t, first.Error, again.Error)
+			current, _ := p.currentSnapshot()
+			require.Len(t, current.Providers, 1, "session fallbacks must not alter the background report")
+			require.Empty(t, current.Unavailable, "an empty session result is not a provider failure")
 			require.Len(t, original.Providers, 1, "publishing a fallback must not mutate a previously served snapshot")
 			require.Empty(t, original.Unavailable)
 			p.sessionJSON(ctx, "task-1", "gemini-session", true)
 			require.Greater(t, atomic.LoadInt32(&calls), afterFirst, "explicit refresh must rebuild fallback usage")
 		})
 	}
+}
+
+func TestSessionFallbackDoesNotWaitForPoll(t *testing.T) {
+	p := newTestPlugin(t, codexbarConfig(map[string]any{configKeyProviders: "codex"}),
+		[]pluginsdk.Session{session("gemini-session", "Gemini CLI")}, providerRunner(nil, map[string][]byte{
+			"codex":  []byte("[" + sampleCodexEntry + "]"),
+			"gemini": []byte(`[{"provider":"gemini","usage":{"primary":{"usedPercent":25}}}]`),
+		}))
+	p.pollOnce(context.Background(), 0)
+	p.pollMu.Lock()
+	done := make(chan struct{})
+	response := make(chan []byte, 1)
+	go func() {
+		defer close(done)
+		response <- p.sessionJSON(context.Background(), "task-1", "gemini-session", false)
+	}()
+	select {
+	case raw := <-response:
+		var report SessionUsageReport
+		require.NoError(t, json.Unmarshal(raw, &report))
+		require.Equal(t, 25.0, report.Usage.Windows[0].UtilizationPct)
+	case <-time.After(time.Second):
+		t.Error("session read waited behind the background poll")
+	}
+	p.pollMu.Unlock()
+	<-done
+}
+
+func TestSessionFallbackWaitIsCancellable(t *testing.T) {
+	entered, release := make(chan struct{}), make(chan struct{})
+	var geminiCalls atomic.Int32
+	base := providerRunner(nil, map[string][]byte{
+		"codex":  []byte("[" + sampleCodexEntry + "]"),
+		"gemini": []byte(`[{"provider":"gemini","usage":{"primary":{"usedPercent":25}}}]`),
+	})
+	p := newTestPlugin(t, codexbarConfig(map[string]any{configKeyProviders: "codex"}),
+		[]pluginsdk.Session{session("gemini-session", "Gemini CLI")}, func(ctx context.Context, command string, args ...string) ([]byte, error) {
+			if argValue(args, "--provider") == "gemini" && geminiCalls.Add(1) == 1 {
+				close(entered)
+				<-release
+			}
+			return base(ctx, command, args...)
+		})
+	p.pollOnce(context.Background(), 0)
+	leaderDone := make(chan struct{})
+	go func() {
+		defer close(leaderDone)
+		p.sessionJSON(context.Background(), "task-1", "gemini-session", false)
+	}()
+	<-entered
+	defer func() {
+		close(release)
+		<-leaderDone
+	}()
+	ctx, cancel := context.WithCancel(context.Background())
+	waiter := make(chan []byte, 1)
+	go func() { waiter <- p.sessionJSON(ctx, "task-1", "gemini-session", false) }()
+	cancel()
+	select {
+	case raw := <-waiter:
+		var report SessionUsageReport
+		require.NoError(t, json.Unmarshal(raw, &report))
+		require.Nil(t, report.Usage)
+		require.Contains(t, report.Error, "cancel")
+	case <-time.After(time.Second):
+		t.Error("cancelled waiter remained blocked behind another query")
+	}
+	require.EqualValues(t, 1, geminiCalls.Load())
+}
+
+func TestSessionFallbackInvalidatedByFailedPoll(t *testing.T) {
+	base := providerRunner(nil, map[string][]byte{
+		"codex":  []byte("[" + sampleCodexEntry + "]"),
+		"gemini": []byte(`[{"provider":"gemini","usage":{"primary":{"usedPercent":25}}}]`),
+	})
+	p := newTestPlugin(t, codexbarConfig(map[string]any{configKeyProviders: "codex"}),
+		[]pluginsdk.Session{session("gemini-session", "Gemini CLI")}, base)
+	ctx := context.Background()
+	var before SessionUsageReport
+	require.NoError(t, json.Unmarshal(p.sessionJSON(ctx, "task-1", "gemini-session", false), &before))
+	require.NotNil(t, before.Usage)
+	p.run = func(context.Context, string, ...string) ([]byte, error) {
+		return nil, errors.New("codexbar unavailable")
+	}
+	p.pollOnce(ctx, 0)
+	var after SessionUsageReport
+	require.NoError(t, json.Unmarshal(p.sessionJSON(ctx, "task-1", "gemini-session", false), &after))
+	require.False(t, after.Codexbar.Installed)
+	require.Nil(t, after.Usage, "a failed poll must also invalidate the separate session cache")
 }
 
 func TestConcurrentSessionFallbacksShareOneQuery(t *testing.T) {
