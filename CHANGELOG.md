@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.12.0] - 2026-11-03
+
+### Changed
+
+- Improve provider tabs, Antigravity support, and Copilot credits (#36) (278aee4)
+- feat: expose cached provider usage to agents (#29) (2ea7e61)
+- chore(deps): bump google.golang.org/grpc from 1.83.1 to 1.83.2 (#21) (6810b9b)
+
+
 ## [0.11.0] - 2026-11-03
 
 ### Changed
