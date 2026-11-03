@@ -5,7 +5,7 @@ utilization** for your agent providers — how much of each rate-limit window
 (5-hour / weekly / monthly …) is used, with reset times — in the shared page-wide
 and session top bars and, when enabled, Kandev's global status bar. Data comes from the
 [codexbar](https://github.com/steipete/codexbar) CLI (covers ~60 providers:
-Claude, Codex/OpenAI, Gemini, Copilot, Cursor, Grok, OpenCode, …) plus
+Claude, Codex/OpenAI, Antigravity, Copilot, Cursor, Grok, OpenCode, …) plus
 Augment's own Analytics API.
 
 ## Screenshots
@@ -136,6 +136,19 @@ the UI Refresh action when a fresh provider read is needed.
   supplies a summary and the next expiry.
   Missing reset data leaves the section hidden, while a reported zero is shown
   as zero. This is display-only; the plugin does not redeem credits.
+- **Antigravity** replaces Gemini in the default provider list. Local discovery
+  detects `agy`, Antigravity ACP, and the desktop app. Usage comes from CodexBar's
+  Antigravity provider, with automatic selection of the signed-in CLI source.
+  Antigravity sessions use Antigravity quotas, including sessions that run Claude models.
+  Explicit Gemini provider settings remain available for enterprise and API-key accounts.
+- **Copilot AI credits** show exact consumption, such as `3,313 / 25,000 AI credits`,
+  in the provider panel, Settings, and the phone Status drawer.
+  The plugin reads numeric credit counters from CodexBar without estimates from rounded percentages.
+  The total comes from CodexBar or the optional **Copilot → Included AI credits** setting.
+  Without a total, the plugin shows only consumed credits. The configured allowance controls
+  the display and does not change a GitHub billing limit. Existing quota percentages remain independent.
+- **Provider tabs** fade at edges with hidden tabs. The horizontal scrollbar
+  appears on hover or keyboard focus without a change in row height.
 - **Augment** is a special case: codexbar can't read it off macOS, so it's
   fetched directly from Augment's Analytics API. Shows month-to-date
   consumption as a used-of-budget bar (defaulting to a 2.5M-credit budget for

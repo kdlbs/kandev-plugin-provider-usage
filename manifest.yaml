@@ -18,7 +18,7 @@ runtime:
 
 # Read-only access to kandev sessions so the backend can map the composer's
 # kandev session id to the agent it runs, and from there to a codexbar provider
-# (claude / codex / gemini / ...). The UI only ever sends kandev ids; the
+# (claude / codex / antigravity / ...). The UI only ever sends kandev ids; the
 # session -> provider resolution happens server-side.
 capabilities:
   api_read: ["sessions"]
@@ -217,6 +217,14 @@ config_schema:
       description: "Managed by the Show usage switch in each provider's section."
 
     # ── Display ───────────────────────────────────────────────────────────
+    copilot_monthly_credits:
+      type: number
+      minimum: 0
+      title: "Copilot · Included AI credits"
+      description: >-
+        Optional monthly allowance from GitHub, for example 25000. Used for
+        display only. Leave empty to use CodexBar's configured allowance or
+        show credits used without a total. Does not change your billing limit.
     display_pill_providers:
       type: string
       title: "Display · Status bar providers"

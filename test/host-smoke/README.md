@@ -41,6 +41,23 @@ The script writes screenshots and a JSON result to `.build/auth-recovery/`.
 selects a bundle from an extracted package. The phone viewport uses Chromium
 touch emulation at 390 × 844 CSS pixels. It is not a physical-device test.
 
+## Provider panel fixture
+
+`provider-panel.mjs` renders the real bundle with React and synthetic provider data.
+It checks tab overflow, edge fades, scrollbar visibility, keyboard focus, and row height.
+It also checks Antigravity branding, Copilot credit counts, the allowance setting, and the Status drawer.
+The desktop viewport uses Chromium at 1280 × 900 CSS pixels.
+The phone viewport uses Chromium touch emulation at 390 × 844 CSS pixels.
+
+Run the fixture after the browser dependency installation:
+
+```sh
+node test/host-smoke/provider-panel.mjs
+```
+
+The script writes screenshots and a JSON result to `.build/provider-panel/`.
+It does not access live provider accounts or a personal Kandev profile.
+
 ## Disposable host and fixtures
 
 Build and verify the host-platform archive, then upload that exact archive in

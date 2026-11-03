@@ -174,6 +174,21 @@ test("provider sections show quota summaries, reset times and source without los
   app.unmount();
 });
 
+test("Copilot settings show exact credits and save an allowance without losing other settings", async () => {
+  const app = mount("plugin-settings");
+  const config = { unrelated: "keep", cursor_cookie_header: "********" };
+  let tree = await loadSettings(app, { providers: [{ provider: "copilot", windows: [],
+    copilot_credits: { used: 3313, allowance: 25000, allowance_source: "codexbar" } }] }, config);
+  const section = nodes(tree, n => n.props["data-provider-settings"] === "copilot")[0];
+  assert.match(text(section), /3,313 \/ 25,000 AI credits/);
+  settingsInput(tree, "copilot_monthly_credits").props.onChange({ target: { value: "25000" } });
+  tree = app.render();
+  saveSettings(tree).props.onClick();
+  app.requests.at(-1).resolve({ config }); await flush();
+  assert.deepEqual(JSON.parse(app.requests.at(-1).init.body).config, { ...config, copilot_monthly_credits: 25000 });
+  app.unmount();
+});
+
 test("saving releases a slow usage read before the host restarts and ignores its late response", async () => {
   const app = mount("plugin-settings"); app.render();
   const pendingUsage = app.requests.find(r => r.url === "webhooks/providers");

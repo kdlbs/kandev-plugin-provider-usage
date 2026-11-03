@@ -77,7 +77,7 @@ const (
 // unlike codexbar's ~50 web-only providers, which the `all` sweep wastes time
 // probing. Each is still queried; unconfigured ones surface as unavailable.
 var defaultProviders = []string{
-	"claude", "codex", "gemini", "grok", "copilot", "cursor", "opencodego", "amp",
+	"claude", "codex", "antigravity", "grok", "copilot", "cursor", "opencodego", "amp",
 }
 
 // plugin implements pluginsdk.Plugin (via UnimplementedPlugin). Its read
@@ -650,6 +650,7 @@ func (p *plugin) collectProviders(ctx context.Context) *AllProvidersReport {
 			continue
 		}
 		if u := e.toProviderUsage(p.now()); u != nil {
+			applyCopilotAllowance(u, cfg)
 			report.Providers = append(report.Providers, *u)
 		}
 	}

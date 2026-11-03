@@ -56,12 +56,22 @@ var RESET_CREDITS_CSS =
   ".provider-reset-credits .provider-reset-chevron{transition:transform 150ms ease-out}" +
   ".provider-reset-credits details[open] .provider-reset-chevron{transform:rotate(180deg)}" +
   "@media (prefers-reduced-motion:reduce){.provider-reset-credits .provider-reset-chevron{transition:none}}";
+var PROVIDER_TABS_CSS =
+  ".provider-usage-tabs{position:relative;display:flex;gap:3px;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin;scrollbar-color:transparent transparent;padding:2px 0 8px;border-bottom:1px solid var(--border);--tab-fade-left:#000;--tab-fade-right:#000;mask-image:linear-gradient(to right,var(--tab-fade-left),#000 14px,#000 calc(100% - 14px),var(--tab-fade-right))}" +
+  ".provider-usage-tabs[data-overflow-start=true]{--tab-fade-left:transparent}" +
+  ".provider-usage-tabs[data-overflow-end=true]{--tab-fade-right:transparent}" +
+  ".provider-usage-tabs:hover,.provider-usage-tabs:focus-within{scrollbar-color:var(--muted-foreground) transparent}" +
+  ".provider-usage-tabs::-webkit-scrollbar{height:4px}" +
+  ".provider-usage-tabs::-webkit-scrollbar-track,.provider-usage-tabs::-webkit-scrollbar-thumb{background:transparent}" +
+  ".provider-usage-tabs:hover::-webkit-scrollbar-thumb,.provider-usage-tabs:focus-within::-webkit-scrollbar-thumb{background:var(--muted-foreground);border-radius:4px}" +
+  ".provider-usage-tabs button{flex:none}" +
+  ".provider-usage-tabs button:focus-visible{outline:2px solid var(--ring,var(--foreground));outline-offset:-2px}";
 
 function injectTopbarStyles() {
   if (typeof document === "undefined" || document.getElementById(TOPBAR_STYLE_ID)) return;
   var style = document.createElement("style");
   style.id = TOPBAR_STYLE_ID;
-  style.textContent = TOPBAR_CSS + RESET_CREDITS_CSS;
+  style.textContent = TOPBAR_CSS + RESET_CREDITS_CSS + PROVIDER_TABS_CSS;
   document.head.appendChild(style);
 }
 
@@ -118,6 +128,7 @@ var PROVIDER_LABELS = {
   claude: "Claude",
   codex: "Codex / OpenAI",
   gemini: "Gemini",
+  antigravity: "Antigravity",
   copilot: "GitHub Copilot",
   cursor: "Cursor",
   grok: "Grok",
@@ -138,6 +149,7 @@ var PROVIDER_ICON = {
   claude: { mono: "Cl", bg: "#d97757" },
   codex: { mono: "Cx", bg: "#10a37f" },
   gemini: { mono: "Ge", bg: "#4285f4" },
+  antigravity: { mono: "Ag", bg: "#60ba7e" },
   grok: { mono: "Gk", bg: "#1f2937" },
   copilot: { mono: "Co", bg: "#6e5494" },
   cursor: { mono: "Cu", bg: "#111827" },
@@ -183,7 +195,7 @@ function providerMonoIcon(h, id, size, accessibleLabel) {
 // Real brand marks, monochrome (currentColor) for a sober greyscale look. Marks
 // stay at full foreground brightness while adjacent labels carry muted/active
 // emphasis. Each entry is { vb, inner } (source viewBox + inner SVG).
-var PROVIDER_SVG = {"claude":{"vb":"0 0 24 24","inner":"<path d=\"M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z\"></path>"},"codex":{"vb":"0 0 24 24","inner":"<path d=\"M9.205 8.658v-2.26c0-.19.072-.333.238-.428l4.543-2.616c.619-.357 1.356-.523 2.117-.523 2.854 0 4.662 2.212 4.662 4.566 0 .167 0 .357-.024.547l-4.71-2.759a.797.797 0 00-.856 0l-5.97 3.473zm10.609 8.8V12.06c0-.333-.143-.57-.429-.737l-5.97-3.473 1.95-1.118a.433.433 0 01.476 0l4.543 2.617c1.309.76 2.189 2.378 2.189 3.948 0 1.808-1.07 3.473-2.76 4.163zM7.802 12.703l-1.95-1.142c-.167-.095-.239-.238-.239-.428V5.899c0-2.545 1.95-4.472 4.591-4.472 1 0 1.927.333 2.712.928L8.23 5.067c-.285.166-.428.404-.428.737v6.898zM12 15.128l-2.795-1.57v-3.33L12 8.658l2.795 1.57v3.33L12 15.128zm1.796 7.23c-1 0-1.927-.332-2.712-.927l4.686-2.712c.285-.166.428-.404.428-.737v-6.898l1.974 1.142c.167.095.238.238.238.428v5.233c0 2.545-1.974 4.472-4.614 4.472zm-5.637-5.303l-4.544-2.617c-1.308-.761-2.188-2.378-2.188-3.948A4.482 4.482 0 014.21 6.327v5.423c0 .333.143.571.428.738l5.947 3.449-1.95 1.118a.432.432 0 01-.476 0zm-.262 3.9c-2.688 0-4.662-2.021-4.662-4.519 0-.19.024-.38.047-.57l4.686 2.71c.286.167.571.167.856 0l5.97-3.448v2.26c0 .19-.07.333-.237.428l-4.543 2.616c-.619.357-1.356.523-2.117.523zm5.899 2.83a5.947 5.947 0 005.827-4.756C22.287 18.339 24 15.84 24 13.296c0-1.665-.713-3.282-1.998-4.448.119-.5.19-.999.19-1.498 0-3.401-2.759-5.947-5.946-5.947-.642 0-1.26.095-1.88.31A5.962 5.962 0 0010.205 0a5.947 5.947 0 00-5.827 4.757C1.713 5.447 0 7.945 0 10.49c0 1.666.713 3.283 1.998 4.448-.119.5-.19 1-.19 1.499 0 3.401 2.759 5.946 5.946 5.946.642 0 1.26-.095 1.88-.309a5.96 5.96 0 004.162 1.713z\"></path>"},"gemini":{"vb":"0 0 24 24","inner":"<path d=\"M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 01-2.003-.678z\"></path>"},"copilot":{"vb":"0 0 24 24","inner":"<path d=\"M9 23l.073-.001a2.53 2.53 0 01-2.347-1.838l-.697-2.433a2.529 2.529 0 00-2.426-1.839h-.497l-.104-.002c-4.485 0-2.935-5.278-1.75-9.225l.162-.525C2.412 3.99 3.883 1 6.25 1h8.86c1.12 0 2.106.745 2.422 1.829l.715 2.453a2.53 2.53 0 002.247 1.823l.147.005.534.001c3.557.115 3.088 3.745 2.156 7.206l-.113.413c-.154.548-.315 1.089-.47 1.607l-.163.525C21.588 20.01 20.116 23 17.75 23h-8.75zm8.22-15.89l-3.856.001a2.526 2.526 0 00-2.35 1.615L9.21 15.04a2.529 2.529 0 01-2.43 1.847l3.853.002c1.056 0 1.992-.661 2.361-1.644l1.796-6.287a2.529 2.529 0 012.43-1.848z\"></path>"},"amp":{"vb":"0 0 24 24","inner":"<path d=\"M15.087 23.18L12.03 24l-2.097-7.823-5.738 5.738-2.251-2.251 5.718-5.719-7.769-2.082.82-3.057 11.294 3.08 3.08 11.295z\"></path><path d=\"M19.505 18.762l-3.057.82-2.564-9.573-9.572-2.564.819-3.057 11.295 3.079 3.08 11.295z\"></path><path d=\"M23.893 14.374l-3.057.82-2.565-9.572L8.7 3.057 9.52 0l11.295 3.08 3.079 11.294z\"></path>"},"cursor":{"vb":"0 0 24 24","inner":"<path d=\"M22.106 5.68L12.5.135a.998.998 0 00-.998 0L1.893 5.68a.84.84 0 00-.419.726v11.186c0 .3.16.577.42.727l9.607 5.547a.999.999 0 00.998 0l9.608-5.547a.84.84 0 00.42-.727V6.407a.84.84 0 00-.42-.726zm-.603 1.176L12.228 22.92c-.063.108-.228.064-.228-.061V12.34a.59.59 0 00-.295-.51l-9.11-5.26c-.107-.062-.063-.228.062-.228h18.55c.264 0 .428.286.296.514z\"></path>"},"grok":{"vb":"0 0 24 24","inner":"<path d=\"M9.27 15.29l7.978-5.897c.391-.29.95-.177 1.137.272.98 2.369.542 5.215-1.41 7.169-1.951 1.954-4.667 2.382-7.149 1.406l-2.711 1.257c3.889 2.661 8.611 2.003 11.562-.953 2.341-2.344 3.066-5.539 2.388-8.42l.006.007c-.983-4.232.242-5.924 2.75-9.383.06-.082.12-.164.179-.248l-3.301 3.305v-.01L9.267 15.292M7.623 16.723c-2.792-2.67-2.31-6.801.071-9.184 1.761-1.763 4.647-2.483 7.166-1.425l2.705-1.25a7.808 7.808 0 00-1.829-1A8.975 8.975 0 005.984 5.83c-2.533 2.536-3.33 6.436-1.962 9.764 1.022 2.487-.653 4.246-2.34 6.022-.599.63-1.199 1.259-1.682 1.925l7.62-6.815\"></path>"},"opencode":{"vb":"0 0 24 24","inner":"<path d=\"M16 6H8v12h8V6zm4 16H4V2h16v20z\"></path>"},"opencodego":{"vb":"0 0 24 30","inner":"<path fill-rule=\"evenodd\" d=\"M0 0h24v30H0V0zm6 12h12v12H6V12z\"></path>"},"augment":{"vb":"0 0 512 512","inner":"<path d=\"M78.844 464.762c-8.453 0-15.573-1.451-21.359-4.339-5.77-2.888-10.144-7.289-13.076-13.095-2.932-5.807-4.436-12.912-4.436-21.255v-86.028c0-10.605-2.125-18.321-6.329-23.135-4.234-4.798-11.742-7.334-22.507-7.579-3.35 0-6.034-1.253-8.066-3.804C1.008 303.005 0 300.087 0 296.832c0-3.53 1.008-6.448 3.071-8.725 2.048-2.277 4.762-3.53 8.066-3.774 10.765-.26 18.273-2.781 22.507-7.579 4.235-4.798 6.329-12.392 6.329-22.752v-86.028c0-12.637 3.35-22.249 10.005-28.804 6.654-6.555 16.287-9.856 28.866-9.856H181.5c3.862 0 7.042 1.146 9.617 3.408 2.559 2.277 3.862 5.195 3.862 8.694 0 3.301-1.086 6.128-3.257 8.542-2.172 2.414-5.057 3.622-8.671 3.622H87.732c-5.413 0-9.508 1.39-12.316 4.171-2.823 2.781-4.234 7.075-4.234 12.912v86.425c0 7.579-1.551 14.455-4.623 20.644-3.07 6.204-7.181 11.063-12.316 14.623-5.134 3.53-11.137 5.302-18.07 5.302v-1.528c6.933 0 12.936 1.773 18.07 5.303 5.135 3.529 9.245 8.404 12.316 14.623 3.072 6.188 4.623 13.064 4.623 20.643v86.808c0 5.837 1.411 10.115 4.234 12.911 2.823 2.812 6.934 4.172 12.316 4.172h95.318c3.583 0 6.468 1.207 8.671 3.606 2.202 2.414 3.257 5.257 3.257 8.542s-1.272 6.097-3.862 8.511c-2.575 2.414-5.771 3.606-9.617 3.606H78.844v-.092ZM330.501 464.768c-3.862 0-7.042-1.207-9.617-3.606-2.575-2.414-3.863-5.256-3.863-8.511 0-3.255 1.086-6.128 3.258-8.542 2.171-2.414 5.057-3.606 8.671-3.606h95.317c5.414 0 9.509-1.36 12.316-4.171 2.823-2.781 4.235-7.075 4.235-12.912v-86.808c0-7.579 1.551-14.455 4.622-20.643 3.071-6.204 7.182-11.063 12.316-14.623 5.134-3.53 11.137-5.303 18.071-5.303v1.528c-6.934 0-12.937-1.772-18.071-5.302-5.134-3.53-9.245-8.404-12.316-14.623-3.071-6.189-4.622-13.065-4.622-20.644v-86.425c0-5.807-1.412-10.1-4.235-12.912-2.823-2.781-6.933-4.171-12.316-4.171H328.95c-3.583 0-6.469-1.208-8.671-3.622-2.172-2.384-3.258-5.241-3.258-8.542 0-3.529 1.272-6.417 3.863-8.694 2.559-2.277 5.755-3.407 9.617-3.407h102.654c12.58 0 22.181 3.3 28.867 9.855 6.685 6.556 10.005 16.167 10.005 28.804v86.028c0 10.36 2.125 17.969 6.328 22.752 4.235 4.798 11.742 7.334 22.507 7.579 3.351.244 6.034 1.497 8.066 3.774 2.063 2.277 3.071 5.195 3.071 8.725 0 3.301-1.008 6.189-3.071 8.695-2.032 2.521-4.762 3.804-8.066 3.804-10.765.245-18.257 2.781-22.507 7.579-4.234 4.798-6.328 12.5-6.328 23.135v86.028c0 8.358-1.474 15.418-4.437 21.255-2.962 5.837-7.305 10.176-13.076 13.095-5.785 2.888-12.905 4.339-21.359 4.339H330.501v.092Z\"></path><path d=\"M356.885 329.738c18.691 0 33.846-14.929 33.846-33.342 0-18.412-15.155-33.341-33.846-33.341-18.691 0-33.846 14.929-33.846 33.341 0 18.413 15.155 33.342 33.846 33.342ZM167.305 329.738c18.691 0 33.846-14.929 33.846-33.342 0-18.412-15.155-33.341-33.846-33.341-18.691 0-33.846 14.929-33.846 33.341 0 18.413 15.155 33.342 33.846 33.342ZM244.477 32.846l-2.59 68.135c0 3.82-3.661 5.73-10.983 5.73-7.321 0-10.982-1.91-10.982-5.73-.651-16.976-1.178-30.148-1.613-39.484-.217-9.55-.434-16.35-.651-20.384-.217-4.034-.326-6.479-.326-7.32v-1.268c0-4.874 4.529-7.319 13.572-7.319 9.044 0 13.573 2.552 13.573 7.64Zm54.941 0-2.59 68.135c0 3.82-3.661 5.73-10.982 5.73-7.322 0-10.982-1.91-10.982-5.73-.652-16.976-1.179-30.148-1.613-39.484-.218-9.55-.435-16.35-.652-20.384-.217-4.034-.326-6.479-.326-7.32v-1.268c0-4.874 4.53-7.319 13.573-7.319s13.572 2.552 13.572 7.64Z\"></path>"}}; /* __BRAND_ICONS__ */
+var PROVIDER_SVG = {"claude":{"vb":"0 0 24 24","inner":"<path d=\"M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z\"></path>"},"codex":{"vb":"0 0 24 24","inner":"<path d=\"M9.205 8.658v-2.26c0-.19.072-.333.238-.428l4.543-2.616c.619-.357 1.356-.523 2.117-.523 2.854 0 4.662 2.212 4.662 4.566 0 .167 0 .357-.024.547l-4.71-2.759a.797.797 0 00-.856 0l-5.97 3.473zm10.609 8.8V12.06c0-.333-.143-.57-.429-.737l-5.97-3.473 1.95-1.118a.433.433 0 01.476 0l4.543 2.617c1.309.76 2.189 2.378 2.189 3.948 0 1.808-1.07 3.473-2.76 4.163zM7.802 12.703l-1.95-1.142c-.167-.095-.239-.238-.239-.428V5.899c0-2.545 1.95-4.472 4.591-4.472 1 0 1.927.333 2.712.928L8.23 5.067c-.285.166-.428.404-.428.737v6.898zM12 15.128l-2.795-1.57v-3.33L12 8.658l2.795 1.57v3.33L12 15.128zm1.796 7.23c-1 0-1.927-.332-2.712-.927l4.686-2.712c.285-.166.428-.404.428-.737v-6.898l1.974 1.142c.167.095.238.238.238.428v5.233c0 2.545-1.974 4.472-4.614 4.472zm-5.637-5.303l-4.544-2.617c-1.308-.761-2.188-2.378-2.188-3.948A4.482 4.482 0 014.21 6.327v5.423c0 .333.143.571.428.738l5.947 3.449-1.95 1.118a.432.432 0 01-.476 0zm-.262 3.9c-2.688 0-4.662-2.021-4.662-4.519 0-.19.024-.38.047-.57l4.686 2.71c.286.167.571.167.856 0l5.97-3.448v2.26c0 .19-.07.333-.237.428l-4.543 2.616c-.619.357-1.356.523-2.117.523zm5.899 2.83a5.947 5.947 0 005.827-4.756C22.287 18.339 24 15.84 24 13.296c0-1.665-.713-3.282-1.998-4.448.119-.5.19-.999.19-1.498 0-3.401-2.759-5.947-5.946-5.947-.642 0-1.26.095-1.88.31A5.962 5.962 0 0010.205 0a5.947 5.947 0 00-5.827 4.757C1.713 5.447 0 7.945 0 10.49c0 1.666.713 3.283 1.998 4.448-.119.5-.19 1-.19 1.499 0 3.401 2.759 5.946 5.946 5.946.642 0 1.26-.095 1.88-.309a5.96 5.96 0 004.162 1.713z\"></path>"},"gemini":{"vb":"0 0 24 24","inner":"<path d=\"M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 01-2.003-.678z\"></path>"},"copilot":{"vb":"0 0 24 24","inner":"<path d=\"M9 23l.073-.001a2.53 2.53 0 01-2.347-1.838l-.697-2.433a2.529 2.529 0 00-2.426-1.839h-.497l-.104-.002c-4.485 0-2.935-5.278-1.75-9.225l.162-.525C2.412 3.99 3.883 1 6.25 1h8.86c1.12 0 2.106.745 2.422 1.829l.715 2.453a2.53 2.53 0 002.247 1.823l.147.005.534.001c3.557.115 3.088 3.745 2.156 7.206l-.113.413c-.154.548-.315 1.089-.47 1.607l-.163.525C21.588 20.01 20.116 23 17.75 23h-8.75zm8.22-15.89l-3.856.001a2.526 2.526 0 00-2.35 1.615L9.21 15.04a2.529 2.529 0 01-2.43 1.847l3.853.002c1.056 0 1.992-.661 2.361-1.644l1.796-6.287a2.529 2.529 0 012.43-1.848z\"></path>"},"amp":{"vb":"0 0 24 24","inner":"<path d=\"M15.087 23.18L12.03 24l-2.097-7.823-5.738 5.738-2.251-2.251 5.718-5.719-7.769-2.082.82-3.057 11.294 3.08 3.08 11.295z\"></path><path d=\"M19.505 18.762l-3.057.82-2.564-9.573-9.572-2.564.819-3.057 11.295 3.079 3.08 11.295z\"></path><path d=\"M23.893 14.374l-3.057.82-2.565-9.572L8.7 3.057 9.52 0l11.295 3.08 3.079 11.294z\"></path>"},"cursor":{"vb":"0 0 24 24","inner":"<path d=\"M22.106 5.68L12.5.135a.998.998 0 00-.998 0L1.893 5.68a.84.84 0 00-.419.726v11.186c0 .3.16.577.42.727l9.607 5.547a.999.999 0 00.998 0l9.608-5.547a.84.84 0 00.42-.727V6.407a.84.84 0 00-.42-.726zm-.603 1.176L12.228 22.92c-.063.108-.228.064-.228-.061V12.34a.59.59 0 00-.295-.51l-9.11-5.26c-.107-.062-.063-.228.062-.228h18.55c.264 0 .428.286.296.514z\"></path>"},"grok":{"vb":"0 0 24 24","inner":"<path d=\"M9.27 15.29l7.978-5.897c.391-.29.95-.177 1.137.272.98 2.369.542 5.215-1.41 7.169-1.951 1.954-4.667 2.382-7.149 1.406l-2.711 1.257c3.889 2.661 8.611 2.003 11.562-.953 2.341-2.344 3.066-5.539 2.388-8.42l.006.007c-.983-4.232.242-5.924 2.75-9.383.06-.082.12-.164.179-.248l-3.301 3.305v-.01L9.267 15.292M7.623 16.723c-2.792-2.67-2.31-6.801.071-9.184 1.761-1.763 4.647-2.483 7.166-1.425l2.705-1.25a7.808 7.808 0 00-1.829-1A8.975 8.975 0 005.984 5.83c-2.533 2.536-3.33 6.436-1.962 9.764 1.022 2.487-.653 4.246-2.34 6.022-.599.63-1.199 1.259-1.682 1.925l7.62-6.815\"></path>"},"opencode":{"vb":"0 0 24 24","inner":"<path d=\"M16 6H8v12h8V6zm4 16H4V2h16v20z\"></path>"},"opencodego":{"vb":"0 0 24 30","inner":"<path fill-rule=\"evenodd\" d=\"M0 0h24v30H0V0zm6 12h12v12H6V12z\"></path>"},"augment":{"vb":"0 0 512 512","inner":"<path d=\"M78.844 464.762c-8.453 0-15.573-1.451-21.359-4.339-5.77-2.888-10.144-7.289-13.076-13.095-2.932-5.807-4.436-12.912-4.436-21.255v-86.028c0-10.605-2.125-18.321-6.329-23.135-4.234-4.798-11.742-7.334-22.507-7.579-3.35 0-6.034-1.253-8.066-3.804C1.008 303.005 0 300.087 0 296.832c0-3.53 1.008-6.448 3.071-8.725 2.048-2.277 4.762-3.53 8.066-3.774 10.765-.26 18.273-2.781 22.507-7.579 4.235-4.798 6.329-12.392 6.329-22.752v-86.028c0-12.637 3.35-22.249 10.005-28.804 6.654-6.555 16.287-9.856 28.866-9.856H181.5c3.862 0 7.042 1.146 9.617 3.408 2.559 2.277 3.862 5.195 3.862 8.694 0 3.301-1.086 6.128-3.257 8.542-2.172 2.414-5.057 3.622-8.671 3.622H87.732c-5.413 0-9.508 1.39-12.316 4.171-2.823 2.781-4.234 7.075-4.234 12.912v86.425c0 7.579-1.551 14.455-4.623 20.644-3.07 6.204-7.181 11.063-12.316 14.623-5.134 3.53-11.137 5.302-18.07 5.302v-1.528c6.933 0 12.936 1.773 18.07 5.303 5.135 3.529 9.245 8.404 12.316 14.623 3.072 6.188 4.623 13.064 4.623 20.643v86.808c0 5.837 1.411 10.115 4.234 12.911 2.823 2.812 6.934 4.172 12.316 4.172h95.318c3.583 0 6.468 1.207 8.671 3.606 2.202 2.414 3.257 5.257 3.257 8.542s-1.272 6.097-3.862 8.511c-2.575 2.414-5.771 3.606-9.617 3.606H78.844v-.092ZM330.501 464.768c-3.862 0-7.042-1.207-9.617-3.606-2.575-2.414-3.863-5.256-3.863-8.511 0-3.255 1.086-6.128 3.258-8.542 2.171-2.414 5.057-3.606 8.671-3.606h95.317c5.414 0 9.509-1.36 12.316-4.171 2.823-2.781 4.235-7.075 4.235-12.912v-86.808c0-7.579 1.551-14.455 4.622-20.643 3.071-6.204 7.182-11.063 12.316-14.623 5.134-3.53 11.137-5.303 18.071-5.303v1.528c-6.934 0-12.937-1.772-18.071-5.302-5.134-3.53-9.245-8.404-12.316-14.623-3.071-6.189-4.622-13.065-4.622-20.644v-86.425c0-5.807-1.412-10.1-4.235-12.912-2.823-2.781-6.933-4.171-12.316-4.171H328.95c-3.583 0-6.469-1.208-8.671-3.622-2.172-2.384-3.258-5.241-3.258-8.542 0-3.529 1.272-6.417 3.863-8.694 2.559-2.277 5.755-3.407 9.617-3.407h102.654c12.58 0 22.181 3.3 28.867 9.855 6.685 6.556 10.005 16.167 10.005 28.804v86.028c0 10.36 2.125 17.969 6.328 22.752 4.235 4.798 11.742 7.334 22.507 7.579 3.351.244 6.034 1.497 8.066 3.774 2.063 2.277 3.071 5.195 3.071 8.725 0 3.301-1.008 6.189-3.071 8.695-2.032 2.521-4.762 3.804-8.066 3.804-10.765.245-18.257 2.781-22.507 7.579-4.234 4.798-6.328 12.5-6.328 23.135v86.028c0 8.358-1.474 15.418-4.437 21.255-2.962 5.837-7.305 10.176-13.076 13.095-5.785 2.888-12.905 4.339-21.359 4.339H330.501v.092Z\"></path><path d=\"M356.885 329.738c18.691 0 33.846-14.929 33.846-33.342 0-18.412-15.155-33.341-33.846-33.341-18.691 0-33.846 14.929-33.846 33.341 0 18.413 15.155 33.342 33.846 33.342ZM167.305 329.738c18.691 0 33.846-14.929 33.846-33.342 0-18.412-15.155-33.341-33.846-33.341-18.691 0-33.846 14.929-33.846 33.341 0 18.413 15.155 33.342 33.846 33.342ZM244.477 32.846l-2.59 68.135c0 3.82-3.661 5.73-10.983 5.73-7.321 0-10.982-1.91-10.982-5.73-.651-16.976-1.178-30.148-1.613-39.484-.217-9.55-.434-16.35-.651-20.384-.217-4.034-.326-6.479-.326-7.32v-1.268c0-4.874 4.529-7.319 13.572-7.319 9.044 0 13.573 2.552 13.573 7.64Zm54.941 0-2.59 68.135c0 3.82-3.661 5.73-10.982 5.73-7.322 0-10.982-1.91-10.982-5.73-.652-16.976-1.179-30.148-1.613-39.484-.218-9.55-.435-16.35-.652-20.384-.217-4.034-.326-6.479-.326-7.32v-1.268c0-4.874 4.53-7.319 13.573-7.319s13.572 2.552 13.572 7.64Z\"></path>"},"antigravity":{"vb":"0 0 100 100","inner":"<path d=\"M85.2843 88.0301C90.1329 91.6664 97.4057 89.2422 90.7389 82.5755C70.7389 63.1816 74.9813 9.84827 50.1329 9.84827C25.2843 9.84827 29.5267 63.1816 9.52673 82.5755C2.25402 89.8483 10.1328 91.6664 14.9813 88.0301C33.7692 75.3028 32.5571 52.8786 50.1329 52.8786C67.7086 52.8786 66.4965 75.3028 85.2843 88.0301Z\"></path>"}}; /* __BRAND_ICONS__ */
 
 // providerIcon renders the real brand mark when known, else the monogram chip.
 function providerIcon(h, id, size, accessibleLabel) {
@@ -241,8 +253,18 @@ function fmtReset(w) {
 
 // peakPct returns the highest window utilization for a provider, ignoring scoped
 // windows (e.g. "Fable only") so a niche cap doesn't dominate the glance value.
-function peakPct(usage) {
+function usageDisplayWindows(usage) {
   var windows = (usage && usage.windows) || [];
+  if (windows.length) return windows;
+  var credits = usage && usage.provider === "copilot" && usage.copilot_credits;
+  if (!credits || typeof credits.used !== "number" || !isFinite(credits.used) || credits.used < 0 ||
+      typeof credits.allowance !== "number" || !isFinite(credits.allowance) || credits.allowance <= 0) return windows;
+  return [{ label: "AI credits", utilization_pct: credits.used / credits.allowance * 100, scoped: true,
+    reset_at: credits.reset_at, reset_description: credits.reset_description, display_allowance: true }];
+}
+
+function peakPct(usage) {
+  var windows = usageDisplayWindows(usage);
   var max = 0;
   var any = false;
   for (var i = 0; i < windows.length; i++) {
@@ -265,7 +287,7 @@ function peakPct(usage) {
 // statusMeterDetail keeps the compact meter honest: its percentage, remaining
 // capacity, and reset all describe the same highest non-scoped window.
 function statusMeterDetail(usage) {
-  var windows = (usage && usage.windows) || [];
+  var windows = usageDisplayWindows(usage);
   var selected = null;
   var selectedPct = -1;
   function consider(window, allowScoped) {
@@ -601,6 +623,26 @@ function resetCreditsPanel(h, provider) {
 }
 
 // ---- one provider's panel (name + plan + updated, then window bars) --------
+function copilotCreditsPanel(h, usage, warn, high) {
+  var credits = usage && usage.provider === "copilot" && usage.copilot_credits;
+  if (!credits || typeof credits.used !== "number" || !isFinite(credits.used) || credits.used < 0) return null;
+  function count(value) { return value.toLocaleString("en-US", { maximumFractionDigits: 3 }); }
+  var hasAllowance = typeof credits.allowance === "number" && isFinite(credits.allowance) && credits.allowance > 0;
+  var caption = count(credits.used) + (hasAllowance ? " / " + count(credits.allowance) : "") + " AI credits";
+  var percent = hasAllowance ? Math.max(0, Math.min(100, credits.used / credits.allowance * 100)) : 0;
+  var reset = fmtReset(credits);
+  return h("section", { "aria-label": "Copilot AI credits", style: { display: "flex", flexDirection: "column", gap: "6px", fontSize: "11px", fontVariantNumeric: "tabular-nums" } },
+    h("div", { style: { fontWeight: 600, fontSize: "12px" } }, caption),
+    hasAllowance ? h("div", { role: "meter", "aria-label": "AI credit allowance used", "aria-valuemin": 0,
+      "aria-valuemax": credits.allowance, "aria-valuenow": Math.min(credits.used, credits.allowance), "aria-valuetext": caption,
+      style: { height: "4px", borderRadius: "9999px", overflow: "hidden", background: COLOR.track } },
+      h("div", { style: { height: "100%", width: percent + "%", background: tierColor(percent, warn, high), borderRadius: "9999px" } })) : null,
+    h("div", { style: { color: "var(--muted-foreground)", lineHeight: 1.5 } },
+      hasAllowance ? "Configured monthly allowance" : "Monthly allowance not reported",
+      reset ? " · " + reset : null),
+  );
+}
+
 function providerPanel(host, p, warn, high, generatedAt, reload, isCurrent, translation) {
   var h = host.jsx;
   var windows = p.windows || [];
@@ -638,10 +680,11 @@ function providerPanel(host, p, warn, high, generatedAt, reload, isCurrent, tran
           { style: { display: "flex", flexDirection: "column", gap: "13px" } },
           providerWindows(h, p, warn, high),
         )
-      : p.detail
+      : p.detail || p.copilot_credits
         ? null
         : h("div", { style: { fontSize: "12px", opacity: 0.55 } }, "No rate-limit windows reported."),
     resetCreditsPanel(h, p),
+    copilotCreditsPanel(h, p, warn, high),
     cursorExtrasPanel(h, p, translation),
     // Augment consumption + pace, sober, below the bar.
     p.detail
@@ -656,11 +699,37 @@ function providerPanel(host, p, warn, high, generatedAt, reload, isCurrent, tran
 }
 
 // ---- provider tab strip (text pills) --------------------------------------
+function updateTabOverflow(node) {
+  if (!node) return;
+  node.setAttribute("data-overflow-start", String(node.scrollLeft > 1));
+  node.setAttribute("data-overflow-end", String(node.scrollWidth - node.clientWidth - node.scrollLeft > 1));
+}
+
 function tabStrip(host, providers, active, current, onSelect) {
   var h = host.jsx;
   return h(
     "div",
-    { style: { display: "flex", gap: "3px", overflowX: "auto", paddingBottom: "9px", borderBottom: "1px solid " + COLOR.track } },
+    {
+      className: "provider-usage-tabs", role: "group", "aria-label": "Usage providers",
+      ref: function (node) {
+        if (!node) return;
+        // Reveal a newly selected provider without resetting a user's scroll
+        // position on the periodic snapshot renders.
+        var id = providers[active] && providers[active].provider;
+        if (node.getAttribute("data-active-provider") !== id) {
+          var button = node.children[active];
+          if (button) {
+            if (button.offsetLeft < node.scrollLeft) node.scrollLeft = Math.max(0, button.offsetLeft - 14);
+            else if (button.offsetLeft + button.offsetWidth > node.scrollLeft + node.clientWidth) {
+              node.scrollLeft = button.offsetLeft + button.offsetWidth - node.clientWidth + 14;
+            }
+          }
+          node.setAttribute("data-active-provider", id);
+        }
+        updateTabOverflow(node);
+      },
+      onScroll: function (event) { updateTabOverflow(event.currentTarget); },
+    },
     providers.map(function (p, i) {
       var isActive = i === active;
       var isCurrent = current && p.provider === current;
@@ -670,6 +739,7 @@ function tabStrip(host, providers, active, current, onSelect) {
           key: p.provider,
           type: "button",
           title: providerLabel(p.provider) + (isCurrent ? " · this session" : ""),
+          "aria-pressed": isActive,
           onClick: function () { onSelect(i); },
           style: {
             display: "inline-flex",
@@ -899,7 +969,7 @@ function makeTopBarStatus(host) {
       ? providerIcon(h, selected.provider, 14)
       : gaugeIcon(h, 14);
     var actionText = selected
-      ? ((selected.windows || []).length ? fmtPct(peakPct(selected)) : "—")
+      ? (usageDisplayWindows(selected).length ? fmtPct(peakPct(selected)) : "—")
       : undefined;
     var actionLabel = translatedText(translation, "providerUsage", "Provider usage");
     var trigger;
@@ -995,7 +1065,7 @@ function pillContent(host, d, selectedProvider) {
   ids.forEach(function (id) {
     var pu = providerByName(d.providers, id);
     if (!pu) return;
-    var hasQuota = (pu.windows || []).length > 0;
+    var hasQuota = usageDisplayWindows(pu).length > 0;
     var pct = hasQuota ? fmtPct(peakPct(pu)) : "—";
     if (segs.length) {
       segs.push(h("span", { key: "sep" + id, style: { width: "1px", alignSelf: "stretch", background: "currentColor", opacity: 0.22, margin: "1px 0" } }));
@@ -1173,10 +1243,11 @@ function statusMeterDrawerRow(host, usage, warn, high, translation) {
         usageText + (detail.reset ? " · " + detail.reset : ""),
       ),
       usage.provider === "cursor" ? h("div", { style: { display: "flex", flexDirection: "column", gap: "13px", marginTop: "8px" } }, providerWindows(h, usage, warn, high))
-        : detail.window ? statusMeterTrack(h, detail, warn, high) : null,
+        : detail.window && !detail.window.display_allowance ? statusMeterTrack(h, detail, warn, high) : null,
       usage.provider === "codex" && detail.window && paceText(detail.window.pace)
         ? h("div", { style: { fontSize: "11px", color: "var(--muted-foreground)", fontVariantNumeric: "tabular-nums" } }, paceText(detail.window.pace)) : null,
       resetCreditsPanel(h, usage),
+      copilotCreditsPanel(h, usage, warn, high),
       cursorExtrasPanel(h, usage, translation),
     ),
   );
@@ -1713,6 +1784,7 @@ var SETTINGS_FIELDS = {
   augment_email: { label: "Account email", type: "email", hint: "Your Augment organization email." },
   augment_monthly_budget: { label: "Monthly budget", type: "number", min: 0, hint: "Leave empty to use the budget reported by Augment." },
   augment_resource: { label: "Plan unit", default: "credits", options: [["credits", "Credits"], ["usd", "USD"]] },
+  copilot_monthly_credits: { label: "Included AI credits", type: "number", min: 0, hint: "Optional monthly allowance from GitHub, for example 25000. Used for display only. Leave empty to use CodexBar's allowance or show only credits used. Does not change your billing limit." },
   codexbar_poll_minutes: { label: "Refresh every (minutes)", type: "number", min: 1, default: 5 },
   display_status_bar_mode: { label: "Status bar", default: "off", options: [["off", "Off"], ["percentage", "Percentage"], ["meter", "Meter"], ["both", "Meter and percentage"]] },
   display_pill_providers: { label: "Status bar providers", default: "" },
@@ -1721,6 +1793,7 @@ var SETTINGS_FIELDS = {
   codexbar_command: { label: "CLI path", hint: "Leave empty to find or download CodexBar automatically." },
 };
 var PROVIDER_SETTING_FIELDS = {
+  copilot: ["copilot_monthly_credits"],
   cursor: ["cursor_cookie_header", "cursor_desktop_keychain", "cursor_agent_keychain"],
   augment: ["augment_api_token", "augment_email", "augment_monthly_budget", "augment_resource"],
 };
@@ -1935,6 +2008,7 @@ function settingsProviderDetails(host, provider, usage, failure, connection, pen
       (usage.windows || []).length ? h("div", { className: "provider-settings-quotas", "aria-label": providerLabel(provider.provider) + " usage" },
         providerWindows(h, usage, report && report.warn_threshold, report && report.high_threshold)) : null,
       cursorExtrasPanel(h, usage, translation),
+      copilotCreditsPanel(h, usage, report && report.warn_threshold, report && report.high_threshold),
       resetCreditsPanel(h, usage),
       usage.detail_warning && usage.provider !== "cursor" ? h("p", { className: "provider-settings-notice" }, usage.detail_warning) : null,
     ) : h("div", { className: "provider-settings-notice", "data-tone": connection.tone },

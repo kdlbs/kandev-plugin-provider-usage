@@ -1,0 +1,26 @@
+[
+  {
+    "provider": "copilot",
+    "source": "api",
+    "usage": {
+      "primary": { "usedPercent": 14, "resetsAt": "2026-12-01T00:00:00Z" },
+      "identity": { "loginMethod": "Business" },
+      "updatedAt": "2026-11-03T12:00:00Z",
+      "details": [
+        {
+          "title": "Credits",
+          "rows": [
+            {
+              "id": "copilot-seat-credits",
+              "label": "Credits used",
+              "value": "3,313 / 25,000",
+              "secondaryValue": "resets in 28 days",
+              "usageValue": 3313,
+              "progress": { "used": 3313, "total": 25000 }
+            }
+          ]
+        }
+      ]
+    }
+  }
+]
