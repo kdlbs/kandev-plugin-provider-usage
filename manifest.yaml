@@ -6,6 +6,8 @@ description: "Subscription utilization for your agent providers — how much of 
 author: "kandev"
 categories: ["analytics"]
 repo_url: "https://github.com/kdlbs/kandev-plugin-provider-usage"
+# Coordinator and external instance tools require host 0.99.0 or later.
+min_kandev_version: "0.99.0"
 
 runtime:
   type: binary
@@ -27,7 +29,8 @@ capabilities:
 agent_tools:
   - name: get_provider_usage
     description: "Returns the cached, instance-wide provider usage snapshot; never refreshes provider telemetry."
-    surfaces: [kanban-task, office-task]
+    surfaces: [kanban-task, office-task, automation, coordinator, external]
+    invocation_scope: instance
     input_schema:
       type: object
       properties: {}

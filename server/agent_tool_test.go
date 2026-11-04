@@ -30,6 +30,59 @@ func TestGetProviderUsageUsesSnapshotWithoutIO(t *testing.T) {
 	require.Equal(t, "future-provider", providers[0].(map[string]any)["provider_id"])
 }
 
+func TestGetProviderUsageInstanceContextsUseCache(t *testing.T) {
+	now := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	p := newPlugin()
+	p.now = func() time.Time { return now }
+	windowSeconds := int64(18000)
+	p.snapshot = &AllProvidersReport{
+		GeneratedAt: now.Add(-30 * time.Second).Format(time.RFC3339),
+		Codexbar:    InstallStatus{Installed: true},
+		PollMinutes: 5,
+		Providers: []ProviderUsage{{
+			Provider:  "codex",
+			FetchedAt: now.Add(-30 * time.Second),
+			Windows:   []UtilizationWindow{{Label: "5-hour", UtilizationPct: 25, WindowSeconds: &windowSeconds}},
+		}},
+	}
+	var calls atomic.Int32
+	p.run = func(context.Context, string, ...string) ([]byte, error) {
+		calls.Add(1)
+		return nil, nil
+	}
+
+	for _, tc := range []struct {
+		surface   string
+		workspace string
+	}{
+		{surface: "kanban-task", workspace: "ws-1"},
+		{surface: "office-task", workspace: "ws-1"},
+		{surface: "automation", workspace: "ws-1"},
+		{surface: "coordinator", workspace: "ws-1"},
+		{surface: "external", workspace: ""},
+	} {
+		t.Run(tc.surface, func(t *testing.T) {
+			result, err := p.InvokeAgentTool(context.Background(), &pluginsdk.AgentToolRequest{
+				Name: providerUsageTool, Arguments: map[string]any{},
+				Context: pluginsdk.AgentToolContext{Surface: tc.surface, WorkspaceID: tc.workspace},
+			})
+			require.NoError(t, err)
+			require.False(t, result.IsError)
+			require.False(t, result.StructuredContent["partial"].(bool))
+			require.EqualValues(t, 600, result.StructuredContent["stale_after_seconds"])
+			scope := result.StructuredContent["scope"].(map[string]any)
+			require.Equal(t, "instance", scope["usage_scope"])
+			require.Equal(t, tc.workspace, scope["invocation_workspace_id"])
+			provider := result.StructuredContent["providers"].([]any)[0].(map[string]any)
+			require.False(t, provider["stale"].(bool))
+			window := provider["windows"].([]any)[0].(map[string]any)
+			require.EqualValues(t, 25, window["utilization_percentage"])
+			require.EqualValues(t, 75, window["remaining_percentage"])
+		})
+	}
+	require.Zero(t, calls.Load(), "every context must read the shared in-memory cache")
+}
+
 func TestGetProviderUsageConcurrentCallsNeverRunProviders(t *testing.T) {
 	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
 	p := newPlugin()

@@ -56,10 +56,21 @@ a projected month-end total:
 ### MCP agent tool
 
 The plugin exposes the read-only MCP tool
-`kandev_kandev_provider_usage_get_provider_usage` on Kanban and Office task
-surfaces. It returns the existing instance-wide, non-user-scoped background
-snapshot; Kandev supplies the invocation workspace identity and callers cannot
-select a workspace, account, session, or credential.
+`kandev_kandev_provider_usage_get_provider_usage` on Kanban, Office, approved
+automation, bound phase-2 coordinator, and external MCP surfaces. The declaration
+uses `invocation_scope: instance`, so the tool works without a task identity.
+The tool returns the shared background snapshot for the Kandev instance.
+Usage is not scoped to individual users. Kandev supplies the workspace identity
+when the invocation has a workspace. Callers cannot select a workspace, account,
+session, or credential.
+
+External MCP calls carry no task, session, or workspace identity, so their
+`scope.invocation_workspace_id` is the empty string. Automation calls need the
+existing saved approval for this tool. Coordinator calls need the conversation's
+exact version-2 plugin binding. Configuration surfaces never receive the tool.
+
+The declaration requires Kandev 0.99.0 or later. The manifest sets
+`min_kandev_version: "0.99.0"` to prevent installation on older hosts.
 
 Calls never run codexbar or contact provider APIs. They return cached telemetry
 with generation time, age, and a stale flag (at twice the configured polling
@@ -69,8 +80,8 @@ telemetry, unavailable providers, missing configuration, unsupported providers,
 and unknown errors. The structured result contains only normalized metadata and
 never raw provider errors, account identifiers, or credentials.
 
-Coordinators should poll no more frequently than the configured interval. Use
-the UI Refresh action when a fresh provider read is needed.
+For coordinators and external clients, use a polling interval at least as long
+as the configured interval. For a fresh provider read, use the UI Refresh action.
 
 - **Provider settings**: one section per detected provider, with connection
   status, plan/team and usage summaries, quota resets, source and freshness.
@@ -466,9 +477,9 @@ It does not assume that the account summary or RPC accepts a team query paramete
 
 Use Go 1.26.0 and Node 24. The Node tests use built-in modules and need no npm
 dependencies. `.kandev-sdk-ref` pins the Kandev source used by the Go module
-replacement and the host Action contract. This source pin does not set the
-plugin's runtime minimum. The manifest remains API v1 and has no declared
-`min_kandev_version`; the UI selects the old Button when Action is absent.
+replacement and the package builder. The manifest remains API v1 and requires
+Kandev 0.99.0 or later for the instance tool contexts. The source pin does not
+set the runtime minimum. The UI selects the old Button when Action is absent.
 
 Create the sibling host checkout if needed, then set it to the pinned revision:
 
