@@ -1,4 +1,6 @@
-.PHONY: build test test-package-verifier test-release-version fmt check-format vet \
+.DEFAULT_GOAL := build
+
+.PHONY: sdk-check build test test-package-verifier test-release-version fmt check-format vet \
 	package package-host package-file verify-package verify-package-host clean
 
 BIN := bin/kandev-provider-usage
@@ -10,16 +12,18 @@ VERIFY_HOST := .build/verify-host
 TEST_TMP := $(CURDIR)/.build/tmp
 NODE ?= node
 
-## plugin-pack lives in the kandev monorepo. Run it from THAT module (go -C) so
-## its own dependencies resolve against the SDK's go.sum: running it from here
-## would need go.sum entries for packages this plugin never imports, which
-## `go mod tidy` (enforced in CI) then strips again.
-SDK := ../kandev/apps/backend
-PACK := go -C $(SDK) run ./cmd/plugin-pack
+## Packaging alone needs backend-owned plugin-pack. This checkout is independent
+## of the public SDK dependency and pinned by .kandev-tools-ref (see README).
+## Run inside its own module so tooling dependencies stay out of this go.sum.
+KANDEV_TOOLS ?= $(CURDIR)/.build/kandev-tools
+PACK := go -C "$(KANDEV_TOOLS)/apps/backend" run ./cmd/plugin-pack
+
+sdk-check:
+	go run github.com/kdlbs/kandev/pluginsdk/cmd/kandev-sdk-check@v0.1.0 --manifest manifest.yaml
 
 ## Build the plugin binary for the host platform (development use; the
 ## installed-plugin path always goes through `make package`/`package-host`).
-build:
+build: sdk-check
 	mkdir -p bin
 	go build -o $(BIN) ./server
 
@@ -49,11 +53,11 @@ vet:
 
 ## Cross-compile server/plugin-<goos>-<goarch>[.exe] for every platform
 ## declared in manifest.yaml's runtime.executables, stage manifest.yaml + ui/
-## alongside them, and pack the tree with the kandev repo's plugin-pack
-## (resolved via this repo's local `replace` directive). Install via
+## alongside them, and pack the tree with backend-owned plugin-pack from the
+## explicit KANDEV_TOOLS checkout. Install via
 ## Settings > Plugins (upload) or
 ## `curl -F package=@$(PKG_OUT) http://localhost:<port>/api/plugins/install`.
-package:
+package: sdk-check
 	rm -rf $(STAGE)
 	mkdir -p $(STAGE)/server
 	cp manifest.yaml $(STAGE)/manifest.yaml
@@ -69,7 +73,7 @@ package:
 
 ## Package for the host platform only — faster local iteration than the full
 ## 5-platform `make package`.
-package-host:
+package-host: sdk-check
 	rm -rf $(STAGE)
 	mkdir -p $(STAGE)/server
 	cp manifest.yaml $(STAGE)/manifest.yaml
