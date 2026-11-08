@@ -214,3 +214,33 @@ previous local-SDK build, not to the migrated package. Run the migrated package
 on released Kandev 0.99.0 or later. See
 [`docs/sdk-migration-validation.md`](../../docs/sdk-migration-validation.md)
 for the migration's commands, package evidence, and coverage limits.
+
+
+### Automated public SDK smoke
+
+Install the built package into released Kandev 0.99.0 in a disposable profile,
+configure the fake CodexBar fixture above, and enable the plugin. With browser
+dependencies installed as described above, run:
+
+```sh
+SMOKE_BASE_URL=http://127.0.0.1:43981 node test/host-smoke/sdk-migration.mjs
+```
+
+The test checks the reported minimum host, backend webhooks and validation,
+Host state writes, installed desktop top bar, custom settings on desktop and
+390 × 844 touch emulation, and disable/re-enable with a page reload. It stores
+its JSON result and screenshots under `.build/sdk-migration/`. It marks
+first-run onboarding complete in the test browser's local storage.
+
+For the declared agent tool, start a mock task agent on the disposable host,
+then use that task's agentctl MCP endpoint (not the global host MCP endpoint):
+
+```sh
+SMOKE_MCP_URL=http://127.0.0.1:PORT/mcp python3 test/host-smoke/sdk-mcp.py
+```
+
+This checks MCP initialize, plugin tool discovery, successful structured
+serialization, and rejection of caller-selected workspace arguments. It stores
+`.build/sdk-migration/mcp-result.json`. Use the pinned packaging source's
+`cmd/mock-agent` with the released host's `KANDEV_MOCK_AGENT=only` setting for
+this synthetic local test. It does not require a real model or provider account.
