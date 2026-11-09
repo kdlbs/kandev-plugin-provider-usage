@@ -146,3 +146,21 @@ model and provider; it is not live vendor telemetry. SSH, native macOS Keychain,
 physical phones, other operating-system runtimes, authenticated-host roles and
 plugin version upgrades were not exercised. Cross-platform binary compilation
 and package inspection do not certify those runtime paths.
+
+## Review follow-up, 2026-11-09
+
+Automated review identified two gaps in the installed-host smoke evidence.
+The smoke now requires the host-reported plugin version to equal manifest.yaml,
+records that observed version, requires an installed CLI, and checks the actual
+Codex fixture plan/utilization and Cursor utilization returned by the provider
+webhook. Playwright is loaded after these checks, so the rejection tests need
+no browser dependency installation.
+
+Three HTTP-backed regression cases (older active plugin, HTTP 200 with no CLI,
+and HTTP 200 without fixture usage) failed against the original smoke and passed
+after the correction. `node --test test/*.test.mjs` now passes 101 tests.
+The strengthened `node test/host-smoke/sdk-migration.mjs`, with the same Nix
+LD_LIBRARY_PATH setup, passed all 19 HTTP/lifecycle checks and desktop/phone
+installed UI checks on the same released minimum-host package. No plugin
+runtime or packaged asset changed in this follow-up, so the package digests
+above remain the applicable artifact evidence.

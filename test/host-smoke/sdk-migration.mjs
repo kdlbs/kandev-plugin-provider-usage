@@ -11,11 +11,6 @@ const repo = pathModule.resolve(
 );
 const output = pathModule.join(repo, ".build/sdk-migration");
 fs.mkdirSync(output, { recursive: true });
-const deps =
-  process.env.BROWSER_DEPS_DIR || pathModule.join(repo, ".build/browser-tools");
-const require = createRequire(pathModule.join(deps, "package.json"));
-const { chromium, expect: baseExpect } = require("@playwright/test");
-const expect = baseExpect.configure({ timeout: 30_000 });
 const base = process.env.SMOKE_BASE_URL || "http://127.0.0.1:43981",
   path = "/api/plugins/kandev-provider-usage";
 const checks = [];
@@ -37,8 +32,31 @@ async function request(url, method = "GET", body, expected = 200) {
   }
 }
 assert.equal((await request("/health")).version, "v0.99.0");
-assert.equal((await request(path)).status, "active");
-for (const key of ["status", "discovery", "providers", "session", "overview"])
+const installed = await request(path);
+assert.equal(installed.status, "active");
+const expectedVersion = fs
+  .readFileSync(pathModule.join(repo, "manifest.yaml"), "utf8")
+  .match(/^version: "([^"]+)"$/m)?.[1];
+assert.ok(expectedVersion, "Manifest version is missing");
+assert.equal(
+  installed.version,
+  expectedVersion,
+  "Installed plugin version differs from manifest",
+);
+const cli = await request(path + "/webhooks/status");
+assert.equal(cli.installed, true, "CodexBar fixture is not installed");
+const report = await request(path + "/webhooks/providers");
+const codex = report.providers?.find(
+  (provider) => provider.provider === "codex",
+);
+assert.ok(codex, "Codex fixture usage was not loaded");
+assert.equal(codex.plan, "Disposable smoke fixture");
+assert.equal(codex.windows?.[0]?.utilization_pct, 1234567890.1);
+const cursor = report.providers?.find(
+  (provider) => provider.provider === "cursor",
+);
+assert.equal(cursor?.windows?.[0]?.utilization_pct, 61.25);
+for (const key of ["discovery", "session", "overview"])
   await request(path + "/webhooks/" + key);
 await request(path + "/webhooks/cursor-team", "GET", null, 405);
 await request(path + "/webhooks/cursor-team", "POST", {}, 400);
@@ -57,6 +75,11 @@ assert.match(
   /[/\\]fake-codexbar\.sh$/,
   "Configure the synthetic CodexBar fixture first",
 );
+const deps =
+  process.env.BROWSER_DEPS_DIR || pathModule.join(repo, ".build/browser-tools");
+const require = createRequire(pathModule.join(deps, "package.json"));
+const { chromium, expect: baseExpect } = require("@playwright/test");
+const expect = baseExpect.configure({ timeout: 30_000 });
 const browser = await chromium.launch({ headless: true });
 const browserChecks = [];
 try {
@@ -125,7 +148,7 @@ try {
     JSON.stringify(
       {
         host: "v0.99.0",
-        plugin: "0.12.0",
+        plugin: installed.version,
         browser: browser.version(),
         checks,
         browserChecks,
