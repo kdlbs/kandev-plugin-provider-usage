@@ -8,14 +8,14 @@
 //     current chat session (rendered by the chat-bar icon), resolving the
 //     session -> agent -> provider mapping server-side via the Host data API.
 //
-// It imports only the public pkg/pluginsdk surface — exactly what a third-party
+// It imports only the public pluginsdk surface — exactly what a third-party
 // plugin author would.
 package main
 
 import (
 	"os"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 func main() {

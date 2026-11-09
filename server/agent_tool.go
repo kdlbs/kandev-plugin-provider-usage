@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 const providerUsageTool = "get_provider_usage"

@@ -82,6 +82,42 @@ done
 write_checksums "$host_fixture"
 sh "$verify_script" "$host_fixture" host "$host_platform" >/dev/null
 
+# Current plugin-pack rewrites host-only manifests with normalized YAML and
+# only the packaged platform. Accept that shape while retaining full checks.
+copy_fixture normalized-full
+cat > "$fixture/manifest.yaml" <<'EOF'
+api_version: 1
+runtime:
+    type: binary
+    executables:
+        linux-amd64: server/plugin-linux-amd64
+        linux-arm64: server/plugin-linux-arm64
+        darwin-amd64: server/plugin-darwin-amd64
+        darwin-arm64: server/plugin-darwin-arm64
+        windows-amd64: server/plugin-windows-amd64.exe
+min_kandev_version: 0.99.0
+EOF
+write_checksums "$fixture"
+sh "$verify_script" "$fixture" full >/dev/null
+
+copy_fixture normalized-host
+cp "$host_fixture/$host_executable" "$fixture/$host_executable"
+for executable in "$fixture"/server/*; do
+    [ "$executable" = "$fixture/$host_executable" ] || rm "$executable"
+done
+cat > "$fixture/manifest.yaml" <<EOF
+api_version: 1
+runtime:
+    type: binary
+    executables:
+        $host_platform: $host_executable
+min_kandev_version: 0.99.0
+EOF
+write_checksums "$fixture"
+sh "$verify_script" "$fixture" host "$host_platform" >/dev/null
+expect_failure 'host-only manifest in full mode' "$fixture" full
+expect_failure 'host-only manifest on another platform' "$fixture" host unknown-arch
+
 copy_fixture missing-manifest
 rm "$test_dir/missing-manifest/manifest.yaml"
 expect_failure 'missing manifest.yaml' "$test_dir/missing-manifest"

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 var errUpdateBusy = errors.New("A provider refresh or CodexBar download is already running. Retry shortly.")

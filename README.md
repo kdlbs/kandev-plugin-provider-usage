@@ -464,40 +464,68 @@ It does not assume that the account summary or RPC accepts a team query paramete
 
 ## Develop
 
-Use Go 1.26.0 and Node 24. The Node tests use built-in modules and need no npm
-dependencies. `.kandev-sdk-ref` pins the Kandev source used by the Go module
-replacement and the host Action contract. This source pin does not set the
-plugin's runtime minimum. The manifest remains API v1 and has no declared
-`min_kandev_version`; the UI selects the old Button when Action is absent.
+Use Go 1.26.0 and Node 24. The Go dependency is the public
+`github.com/kdlbs/kandev/pluginsdk v0.1.0`, with no local replacement. The SDK
+has its own version, independent of this plugin and the host. Its published
+`sdk-release.json` declares minimum Kandev `0.99.0` and API versions `[1, 2]`;
+this plugin retains API v1 and declares that SDK-wide minimum host.
 
-Create the sibling host checkout if needed, then set it to the pinned revision:
+The hand-written `ui/bundle.js` has no npm dependencies or build step. The Node
+tests use built-in modules. There is no frontend SDK package or lockfile to
+migrate, and no separate frontend typecheck command.
 
-```sh
-if [ ! -d ../kandev/.git ]; then
-  git clone https://github.com/kdlbs/kandev.git ../kandev
-fi
-SDK_REF="$(cat .kandev-sdk-ref)"
-git -C ../kandev fetch origin "$SDK_REF"
-git -C ../kandev checkout --detach "$SDK_REF"
-```
-
-Keep that checkout at the same revision while running the commands below.
-`plugin-pack` runs inside `../kandev/apps/backend` so it uses the SDK module's
-own dependency files.
+Compilation and tests work in a standalone checkout without Kandev sources:
 
 ```sh
-make check-format
+go mod download
 go mod tidy
 git diff --exit-code -- go.mod go.sum
-make vet
-make test
-make build
+make sdk-check
+make check-format vet test build
+```
+
+`make sdk-check` runs the installed-dependency compatibility checker:
+
+```sh
+go run github.com/kdlbs/kandev/pluginsdk/cmd/kandev-sdk-check@v0.1.0 \
+  --manifest manifest.yaml
+```
+
+Keep SDK pins exact and upgrade deliberately. Install the selected public
+version, regenerate `go.sum`, read its SDK release record, update the manifest
+minimum if necessary, and rerun compatibility, tests, packaging, and a smoke
+test on the declared minimum host before committing an upgrade. If a future
+frontend adopts the SDK, pin `@kdlbs/plugin-sdk` exactly to the shared SDK
+version, commit the generated lockfile, and pass its installed path to the
+checker as `--frontend-sdk node_modules/@kdlbs/plugin-sdk`.
+
+Packaging separately requires backend-owned `plugin-pack`. `.kandev-tools-ref`
+pins its source; it is not the plugin's SDK dependency. The default tooling
+location is ignored `.build/kandev-tools`. Prepare it only for packaging:
+
+```sh
+git clone --filter=blob:none --no-checkout \
+  https://github.com/kdlbs/kandev.git .build/kandev-tools
+git -C .build/kandev-tools sparse-checkout set apps/backend pluginsdk
+TOOLS_REF="$(cat .kandev-tools-ref)"
+git -C .build/kandev-tools fetch origin "$TOOLS_REF"
+git -C .build/kandev-tools checkout --detach "$TOOLS_REF"
 make verify-package-host
 make verify-package
 ```
 
-For a disposable built-package check on a new Action host and the older Button
-fallback, follow [`test/host-smoke/README.md`](test/host-smoke/README.md).
+Both `apps/backend` and root `pluginsdk` are required by the tooling's module.
+`plugin-pack` runs inside that backend module so its dependencies remain
+separate from this plugin's `go.sum`. To use another checkout of the pinned
+revision, pass `KANDEV_TOOLS=/absolute/path/to/kandev` to the package targets.
+CI keeps this tooling checkout in package/release jobs; the test job installs
+only public dependencies. SDK compilation is checkout-free; packaging still
+needs that explicit tooling source.
+
+For a disposable built-package check, follow
+[`test/host-smoke/README.md`](test/host-smoke/README.md). Older Button fallback
+coverage remains useful as a UI contract test, but this SDK build requires
+Kandev 0.99.0 or later.
 
 Install the tarball via **Settings → Plugins → Install plugin → Upload**.
 For filesystem sideloading, copy the archive directly into the running host's

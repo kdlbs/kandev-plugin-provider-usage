@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/ebitengine/purego v0.11.3
-	github.com/kandev/kandev v0.0.0-00010101000000-000000000000
+	github.com/kdlbs/kandev/pluginsdk v0.1.0
 	github.com/stretchr/testify v1.11.1
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.58.0
@@ -35,8 +35,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
-
-// The kandev SDK (pkg/pluginsdk) is not published as a standalone module yet —
-// this repo is developed against a local checkout of the kandev monorepo,
-// assumed to sit at ../kandev (same convention as the other kandev plugins).
-replace github.com/kandev/kandev => ../kandev/apps/backend
