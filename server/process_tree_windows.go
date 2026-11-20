@@ -24,9 +24,21 @@ type processTree struct {
 	job windows.Handle
 }
 
+func runPlatformCommand(cmd *exec.Cmd) ([]byte, error) {
+	tree, err := startProcessTree(cmd)
+	if err != nil {
+		return nil, err
+	}
+	defer tree.Close()
+	return cmd.Wait()
+}
+
 // startProcessTree starts cmd suspended, assigns it to a new kill-on-close job
 // and only then resumes it, so no descendant can be created outside the job.
 func startProcessTree(cmd *exec.Cmd) (*processTree, error) {
+	if err := procNtResumeProcess.Find(); err != nil {
+		return nil, fmt.Errorf("find NtResumeProcess: %w", err)
+	}
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create job object: %w", err)

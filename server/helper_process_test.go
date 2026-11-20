@@ -49,6 +49,18 @@ func TestMain(m *testing.M) {
 		if err := grandchild.Start(); err != nil {
 			os.Exit(9)
 		}
+		startedPath := os.Getenv(helperStopEnv) + ".started"
+		started := false
+		for range 1000 {
+			if _, err := os.Stat(startedPath); err == nil {
+				started = true
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if !started {
+			os.Exit(9)
+		}
 		if os.Getenv(helperEnv) == "spawn-grandchild-sleep" {
 			time.Sleep(60 * time.Second)
 		}
@@ -57,6 +69,9 @@ func TestMain(m *testing.M) {
 		// Survives until the stop file appears, then announces it. A grandchild
 		// ended with its tree never writes the announcement.
 		stop := os.Getenv(helperStopEnv)
+		if err := os.WriteFile(stop+".started", nil, 0o644); err != nil {
+			os.Exit(9)
+		}
 		for range 3000 {
 			if _, err := os.Stat(stop); err == nil {
 				_ = os.WriteFile(stop+".released", nil, 0o644)
