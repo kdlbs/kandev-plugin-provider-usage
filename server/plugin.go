@@ -134,18 +134,9 @@ var _ pluginsdk.Plugin = (*plugin)(nil)
 func newPlugin() *plugin {
 	return &plugin{
 		run: func(ctx context.Context, name string, args ...string) ([]byte, error) {
-			cmd := exec.CommandContext(ctx, name, args...)
-			// --no-color only reaches codexbar's own output; its log lines are
-			// colored by the logging layer and reach stderr as escape sequences
-			// even through a pipe. NO_COLOR turns those off, so a failure reason
-			// lifted from stderr is readable on the Settings card.
-			cmd.Env = append(os.Environ(), "NO_COLOR=1")
-			// Killing the process on a context deadline doesn't unblock Wait: it
-			// keeps reading the output pipe until every process holding the write
-			// end exits. WaitDelay bounds that, so a codexbar run that leaks its
-			// handles to a child can't wedge the poller (which holds pollMu).
-			cmd.WaitDelay = 2 * time.Second
-			out, err := cmd.Output()
+			// A process tree, so a timed-out codexbar never leaves its children
+			// (such as the conhost.exe of a pseudo console) behind.
+			out, err := runProcessTree(ctx, 2*time.Second, name, args...)
 			return out, withStderr(err)
 		},
 		lookPath: exec.LookPath,
