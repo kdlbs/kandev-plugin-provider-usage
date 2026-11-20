@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.0] - 2026-11-20
+
+### Changed
+
+- fix: end the codexbar process tree so Windows timeouts leave no orphan conhost (#39) (37832f8)
+- chore: migrate provider usage to public plugin SDK v0.1.0 (#38) (fba546a)
+
+
 ## [0.12.0] - 2026-11-03
 
 ### Changed

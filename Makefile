@@ -4,7 +4,7 @@
 	package package-host package-file verify-package verify-package-host clean
 
 BIN := bin/kandev-provider-usage
-VERSION := 0.12.0
+VERSION := 0.13.0
 STAGE := .build/stage
 PKG_OUT := kandev-provider-usage-$(VERSION).tar.gz
 VERIFY_FULL := .build/verify-full
