@@ -41,6 +41,30 @@ func TestMain(m *testing.M) {
 			os.Exit(9)
 		}
 		os.Exit(0)
+	case "spawn-grandchild-exit", "spawn-grandchild-sleep":
+		// Stand-in for a codexbar that starts a helper (like the conhost.exe of
+		// a pseudo console) with no shared pipes, then exits or hangs.
+		grandchild := exec.Command(os.Args[0])
+		grandchild.Env = append(os.Environ(), helperEnv+"=hold-file")
+		if err := grandchild.Start(); err != nil {
+			os.Exit(9)
+		}
+		if os.Getenv(helperEnv) == "spawn-grandchild-sleep" {
+			time.Sleep(60 * time.Second)
+		}
+		os.Exit(0)
+	case "hold-file":
+		// Survives until the stop file appears, then announces it. A grandchild
+		// ended with its tree never writes the announcement.
+		stop := os.Getenv(helperStopEnv)
+		for range 3000 {
+			if _, err := os.Stat(stop); err == nil {
+				_ = os.WriteFile(stop+".released", nil, 0o644)
+				os.Exit(0)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		os.Exit(0)
 	case "hold-stdout":
 		stop := os.Getenv(helperStopEnv)
 		for range 3000 {
