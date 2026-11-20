@@ -24,10 +24,10 @@ type processTree struct {
 	job windows.Handle
 }
 
-func runPlatformCommand(cmd *exec.Cmd) ([]byte, error) {
+func runPlatformCommand(cmd *exec.Cmd) error {
 	tree, err := startProcessTree(cmd)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer tree.Close()
 	return cmd.Wait()
