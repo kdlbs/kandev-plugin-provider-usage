@@ -480,6 +480,26 @@ for (const slotProps of [undefined, { workspaceId: "workspace", currentPage: "ka
   });
 }
 
+test("provider tab labels follow the percentage setting and retain accessible names", async () => {
+  for (const enabled of [false, true]) {
+    const app = mount();
+    app.render();
+    app.requests[0].resolve({ ...snapshot, ...(enabled ? { tab_percentage: true } : {}), providers: [
+      { provider: "claude", windows: [{ utilization_pct: 17 }] },
+      { provider: "codex", windows: [] },
+    ] });
+    await flush();
+    trigger(app.render()).props.onClick();
+    const tabs = nodes(app.render(), n => n.type === "button" && n.props["aria-pressed"] !== undefined);
+    assert.equal(tabs.length, 2);
+    assert.equal(text(tabs[0]), enabled ? "17%" : "Claude");
+    assert.equal(text(tabs[1]), enabled ? "—" : "Codex");
+    assert.equal(tabs[0].props["aria-label"], "Claude");
+    assert.equal(tabs[1].props["aria-label"], "Codex / OpenAI");
+    app.unmount();
+  }
+});
+
 test("both topbar slots use one host Action and retain the disclosure trigger", async () => {
   for (const [slot, slotProps] of [
     ["main-top-bar", { currentPage: "kanban", presentation: "desktop" }],

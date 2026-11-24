@@ -232,6 +232,12 @@ config_schema:
       description: >-
         Leave empty for the current session's provider. Use "all" or names
         separated by commas. The top bar remembers its own tab selection.
+    display_tab_percentage:
+      type: string
+      enum: ["off", "on"]
+      default: "off"
+      title: "Display · Provider tab labels"
+      description: "Show usage percentages instead of provider names in tabs."
     display_status_bar_mode:
       type: string
       enum: ["off", "percentage", "meter", "both"]

@@ -706,7 +706,7 @@ function updateTabOverflow(node) {
   node.setAttribute("data-overflow-end", String(node.scrollWidth - node.clientWidth - node.scrollLeft > 1));
 }
 
-function tabStrip(host, providers, active, current, onSelect) {
+function tabStrip(host, providers, active, current, onSelect, showPercentage) {
   var h = host.jsx;
   return h(
     "div",
@@ -741,6 +741,7 @@ function tabStrip(host, providers, active, current, onSelect) {
           type: "button",
           title: providerLabel(p.provider) + (isCurrent ? " · this session" : ""),
           "aria-pressed": isActive,
+          "aria-label": providerLabel(p.provider),
           onClick: function () { onSelect(i); },
           style: {
             display: "inline-flex",
@@ -759,7 +760,7 @@ function tabStrip(host, providers, active, current, onSelect) {
           },
         },
         providerIcon(h, p.provider, 13),
-        h("span", { style: { opacity: isActive ? 1 : 0.62 } }, providerShort(p.provider)),
+        h("span", { style: { opacity: isActive ? 1 : 0.62 } }, showPercentage ? (statusMeterDetail(p).window ? fmtPct(statusMeterDetail(p).pct) : "—") : providerShort(p.provider)),
       );
     }),
   );
@@ -845,7 +846,7 @@ function panelBody(host, state, index, setIndex, reload, topBarSelection, transl
     h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "12px" } },
-      providers.length > 1 ? tabStrip(host, providers, i, d.current_provider, select) : null,
+      providers.length > 1 ? tabStrip(host, providers, i, d.current_provider, select, d.tab_percentage) : null,
       providerPanel(host, p, d.warn_threshold, d.high_threshold, d.generated_at, reload, d.current_provider && p.provider === d.current_provider, translation),
     ),
   );
@@ -1790,6 +1791,7 @@ var SETTINGS_FIELDS = {
   augment_resource: { label: "Plan unit", default: "credits", options: [["credits", "Credits"], ["usd", "USD"]] },
   copilot_monthly_credits: { label: "Included AI credits", type: "number", min: 0, hint: "Optional monthly allowance from GitHub, for example 25000. Fills a missing CodexBar total for display only. Leave empty to show only credits used when no total is reported. Does not change your billing limit." },
   codexbar_poll_minutes: { label: "Refresh every (minutes)", type: "number", min: 1, default: 5 },
+  display_tab_percentage: { label: "Provider tab labels", default: "off", options: [["off", "Provider name"], ["on", "Usage percentage"]] },
   display_status_bar_mode: { label: "Status bar", default: "off", options: [["off", "Off"], ["percentage", "Percentage"], ["meter", "Meter"], ["both", "Meter and percentage"]] },
   display_pill_providers: { label: "Status bar providers", default: "" },
   display_threshold_warn: { label: "Warning at (%)", type: "number", min: 0, max: 100, default: 75 },
@@ -2309,7 +2311,7 @@ function makeSettingsStatus(host) {
         !providers.length ? h("p", { style: { fontSize: "13px", opacity: 0.65 } }, discovery.loading ? "Scanning for providers on this machine…" : "No providers detected. Install or sign in to a provider on the machine running Kandev, then rescan.") : null,
         h(ui.Card, { style: cardStyle },
           h("h3", { style: { fontSize: "14px", fontWeight: 600, margin: "0 0 16px" } }, "Shared settings"),
-          h("div", { style: gridStyle }, field("codexbar_poll_minutes"), field("display_status_bar_mode"), value("display_status_bar_mode") !== "off" ? field("display_pill_providers") : null),
+          h("div", { style: gridStyle }, field("codexbar_poll_minutes"), field("display_tab_percentage"), field("display_status_bar_mode"), value("display_status_bar_mode") !== "off" ? field("display_pill_providers") : null),
           h("details", { style: { marginTop: "18px" } },
             h("summary", { style: { display: "flex", gap: "8px", fontSize: "13px", cursor: "pointer", listStyle: "none" } }, h("span", { className: "provider-settings-chevron", "aria-hidden": true }, "›"), "Advanced"),
             h("div", { style: Object.assign({}, gridStyle, { marginTop: "16px" }) }, field("display_threshold_warn"), field("display_threshold_high"), field("codexbar_command")),

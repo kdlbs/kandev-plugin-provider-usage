@@ -488,6 +488,7 @@ type AllProvidersReport struct {
 	// StatusBarMode controls the optional global status contribution. It lives in
 	// the warm snapshot so every UI surface applies the same operator choice.
 	StatusBarMode string `json:"status_bar_mode"`
+	TabPercentage bool   `json:"tab_percentage"`
 	// PollMinutes is the background refresh interval, echoed so the UI can show
 	// "auto-refreshes every N min".
 	PollMinutes float64         `json:"poll_minutes"`
@@ -605,6 +606,7 @@ func (p *plugin) collectProviders(ctx context.Context) *AllProvidersReport {
 		WarnThreshold: warn,
 		HighThreshold: high,
 		StatusBarMode: p.configuredStatusBarMode(ctx),
+		TabPercentage: cfg["display_tab_percentage"] == "on",
 		PollMinutes:   p.pollInterval(ctx).Minutes(),
 		Providers:     []ProviderUsage{},
 		Unavailable:   []ProviderError{},
