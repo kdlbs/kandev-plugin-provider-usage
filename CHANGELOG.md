@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0] - 2026-11-24
+
+### Changed
+
+- Add percentage labels for provider tabs (#40) (1c9a260)
+
+
 ## [0.13.0] - 2026-11-20
 
 ### Changed
