@@ -52,7 +52,7 @@ try {
       status_bar_mode:"both",warn_threshold:75,high_threshold:90};
     await context.route("https://fixture.invalid/**", async route => {
       const endpoint = new URL(route.request().url()).pathname.slice(1).split("?")[0];
-      const body = endpoint === "config" ? {config:{copilot_monthly_credits:25000}} : data;
+      const body = endpoint === "config" ? {config:{copilot_monthly_credits:25000,display_status_bar_mode:"both"}} : data;
       await route.fulfill({contentType:"application/json",headers:{"Access-Control-Allow-Origin":"*"},body:JSON.stringify(body)});
     });
     await page.setContent(`<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><style>
@@ -103,7 +103,59 @@ try {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     if (phone) assert.ok((await tabs.getByRole("button").first().boundingBox()).height >= 44);
     await page.screenshot({path:path.join(output,phone?"phone-overlay.png":"desktop-overlay.png"),fullPage:true});
+
+    data.providers = [["claude",100], ["codex",6], ["augment",20], ["opencodego",100]].map(([provider, utilization_pct]) => ({
+      provider, fetched_at:now, windows:[{label:"5-hour", utilization_pct}],
+    }));
+    for (const showPercentage of [true, false]) {
+      data.tab_percentage = showPercentage;
+      await page.getByRole("button", {name:"Refresh",exact:true}).click();
+      await expect(tabs.getByRole("button", {name:"OpenCode",exact:true})).toHaveText(showPercentage ? "100%" : "OpenCode");
+      if (!phone) await tabs.hover();
+      const fourTabs = await tabs.evaluate(node => ({
+        width:node.clientWidth, contentWidth:node.scrollWidth, scrollLeft:node.scrollLeft,
+        mask:getComputedStyle(node).maskImage, starts:Array.from(node.children, button => button.offsetTop),
+      }));
+      assert.equal(fourTabs.contentWidth, fourTabs.width, "four provider tabs fit without scrolling");
+      assert.equal(fourTabs.scrollLeft, 0);
+      assert.equal(fourTabs.mask, "none", "four provider tabs have no edge fade");
+      if (showPercentage) assert.equal(new Set(fourTabs.starts).size, 1, "four percentage tabs fit in one row");
+      await expect(tabs).toHaveAttribute("data-overflow-start", "false");
+      await expect(tabs).toHaveAttribute("data-overflow-end", "false");
+    }
+    data.providers = providers;
+
     await page.evaluate(() => window.renderView("plugin-settings"));
+    await page.locator('#provider-usage-settings[data-ready="true"]').waitFor();
+    const refreshInterval = page.getByLabel("Refresh every (minutes)", {exact:true});
+    const tabLabels = page.getByLabel("Provider tab labels", {exact:true});
+    const statusBar = page.getByLabel("Status bar", {exact:true});
+    const statusProviders = page.locator("#provider-setting-display_pill_providers");
+    const providersSummary = statusProviders.locator(":scope > summary");
+    const heights = await Promise.all([refreshInterval, tabLabels, statusBar, statusProviders]
+      .map(async control => (await control.boundingBox()).height));
+    assert.deepEqual(heights, [44,44,44,44], "closed shared settings controls share a 44px height");
+    for (const trigger of [tabLabels, statusBar, providersSummary]) {
+      const styles = await trigger.evaluate(node => {
+        const style = getComputedStyle(node);
+        const nativeSelect = node.matches("select");
+        const arrow = getComputedStyle(nativeSelect ? node.parentElement : node, "::after");
+        return { appearance: nativeSelect ? style.appearance : "none", padding: parseFloat(style.paddingInlineEnd),
+          inset: parseFloat(arrow.insetInlineEnd), width: parseFloat(arrow.width), pointerEvents: arrow.pointerEvents };
+      });
+      assert.equal(styles.appearance, "none");
+      assert.ok(styles.inset >= 10 && styles.padding >= styles.inset + styles.width, "chevron fits inside the end padding");
+      assert.equal(styles.pointerEvents, "none");
+    }
+    await statusBar.selectOption("meter");
+    if (phone) await providersSummary.tap(); else await providersSummary.press("Space");
+    await expect(statusProviders).toHaveAttribute("open", "");
+    await statusProviders.getByRole("checkbox", {name:"Codex / OpenAI",exact:true}).check();
+    await expect(providersSummary).toHaveText("Current session, Codex / OpenAI");
+    await page.getByRole("button", {name:"Discard changes",exact:true}).click();
+    await expect(statusBar).toHaveValue("both");
+    await expect(providersSummary).toHaveText("Current session");
+    if (phone) await providersSummary.tap(); else await providersSummary.press("Space");
     const copilot = page.locator('[data-provider-settings="copilot"]');
     await copilot.locator(":scope > summary").click();
     await copilot.getByText("3,313 / 25,000 AI credits",{exact:true}).waitFor();
@@ -125,7 +177,8 @@ try {
     assert.deepEqual(errors, []);
     results.push({viewport:phone?"390×844 touch emulation":"1280×900 desktop",browser:browser.version(),status:"passed",
       checks:["edge fades",...(phone?["touch activation","44px tab targets"]:["scrollbar hover/focus","no layout shift"]),
-        "tab selection","Antigravity branding","exact Copilot credits","allowance setting","Status drawer",
+        "tab selection","four provider tabs fit without scrolling","Antigravity branding","exact Copilot credits","allowance setting",
+        "shared settings control geometry and interaction","Status drawer",
         "unknown allowance and observed zero","no horizontal page overflow"]});
     await context.close();
   }

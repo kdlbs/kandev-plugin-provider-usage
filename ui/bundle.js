@@ -57,7 +57,9 @@ var RESET_CREDITS_CSS =
   ".provider-reset-credits details[open] .provider-reset-chevron{transform:rotate(180deg)}" +
   "@media (prefers-reduced-motion:reduce){.provider-reset-credits .provider-reset-chevron{transition:none}}";
 var PROVIDER_TABS_CSS =
-  ".provider-usage-tabs{position:relative;display:flex;gap:3px;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin;scrollbar-color:transparent transparent;padding:2px 0 8px;border-bottom:1px solid var(--border);--tab-fade-left:#000;--tab-fade-right:#000;mask-image:linear-gradient(to right,var(--tab-fade-left),#000 14px,#000 calc(100% - 14px),var(--tab-fade-right))}" +
+  ".provider-usage-tabs{position:relative;display:flex;gap:3px;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin;scrollbar-color:transparent transparent;padding:2px 0 8px;border-bottom:1px solid var(--border);--tab-fade-left:#000;--tab-fade-right:#000}" +
+  ".provider-usage-tabs[data-wrap=true]{flex-wrap:wrap}" +
+  ".provider-usage-tabs:is([data-overflow-start=true],[data-overflow-end=true]){mask-image:linear-gradient(to right,var(--tab-fade-left),#000 14px,#000 calc(100% - 14px),var(--tab-fade-right))}" +
   ".provider-usage-tabs[data-overflow-start=true]{--tab-fade-left:transparent}" +
   ".provider-usage-tabs[data-overflow-end=true]{--tab-fade-right:transparent}" +
   ".provider-usage-tabs:hover,.provider-usage-tabs:focus-within{scrollbar-color:var(--muted-foreground) transparent}" +
@@ -714,6 +716,7 @@ function tabStrip(host, providers, active, current, onSelect, showPercentage) {
     "div",
     {
       className: "provider-usage-tabs", role: "group", "aria-label": "Usage providers",
+      "data-wrap": providers.length <= 4,
       ref: function (node) {
         if (!node) return;
         // Reveal a newly selected provider without resetting a user's scroll
@@ -749,7 +752,7 @@ function tabStrip(host, providers, active, current, onSelect, showPercentage) {
             display: "inline-flex",
             alignItems: "center",
             gap: "5px",
-            padding: "3px 8px",
+            padding: "3px 6px",
             border: "none",
             borderRadius: "7px",
             cursor: "pointer",
@@ -1758,17 +1761,19 @@ function makeCursorTeamSettings(host) {
       h("label", { htmlFor: "provider-usage-cursor-team", style: { fontSize: "13px", fontWeight: 600 } }, "Team"),
       h("p", { style: { fontSize: "12px", opacity: 0.65, margin: "6px 0 12px" } }, "Choose which team's usage to show. Account usage (automatic) keeps account-wide usage when optional details fail. A selected team shows only that team's usage for your member account. Choose and save to change scope."),
       h("div", { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "8px" } },
-        h("select", {
-          id: "provider-usage-cursor-team", "aria-label": "Cursor team", value: choice, disabled: disabled || !state.data,
-          onChange: function (event) {
-            setChoice(event.target.value);
-            setState(function (s) { return Object.assign({}, s, { error: null, message: null }); });
+        h("div", { className: "provider-settings-select", style: { flex: "1 1 200px", minWidth: 0, maxWidth: "100%" } },
+          h("select", {
+            id: "provider-usage-cursor-team", "aria-label": "Cursor team", value: choice, disabled: disabled || !state.data,
+            className: "provider-settings-control",
+            onChange: function (event) {
+              setChoice(event.target.value);
+              setState(function (s) { return Object.assign({}, s, { error: null, message: null }); });
+            },
           },
-          style: { flex: "1 1 200px", minWidth: 0, maxWidth: "100%", minHeight: "44px", padding: "8px 10px", borderRadius: "6px", border: "1px solid var(--border)", background: "var(--background)", color: "inherit", fontSize: "13px" },
-        },
-          h("option", { value: "" }, state.loading && !state.data ? "Loading teams…" : "Account usage (automatic)"),
-          missing ? h("option", { value: saved, disabled: true }, (state.data.error ? "Saved team (" : "Unavailable team (") + saved + ")") : null,
-          teams.map(function (team) { return h("option", { key: team.id, value: team.id }, team.name + (names[team.name] > 1 ? " (" + team.id + ")" : "")); }),
+            h("option", { value: "" }, state.loading && !state.data ? "Loading teams…" : "Account usage (automatic)"),
+            missing ? h("option", { value: saved, disabled: true }, (state.data.error ? "Saved team (" : "Unavailable team (") + saved + ")") : null,
+            teams.map(function (team) { return h("option", { key: team.id, value: team.id }, team.name + (names[team.name] > 1 ? " (" + team.id + ")" : "")); }),
+          ),
         ),
         h(host.ui.Button, { type: "button", style: { minHeight: "44px" }, disabled: disabled || !state.data || choice === saved, onClick: function () { save(); } }, state.saving ? "Saving…" : "Save team"),
         h(host.ui.Button, { type: "button", style: { minHeight: "44px" }, variant: "outline", disabled: disabled, onClick: load }, "Reload teams"),
@@ -1900,12 +1905,11 @@ function statusProvidersField(host, key, value, change, disabled, providers) {
   }).join(", ");
   return h("div", { key: key, style: { minWidth: 0 } },
     h("div", { id: id + "-label", style: { fontWeight: 600, fontSize: "13px", marginBottom: "6px" } }, "Status bar providers"),
-    h("details", { id: id, style: { border: "1px solid var(--border)", borderRadius: "6px", background: "var(--background)", fontSize: "13px" } },
-      h("summary", { "aria-labelledby": id + "-label " + id + "-summary", "aria-disabled": disabled,
+    h("details", { id: id },
+      h("summary", { className: "provider-settings-control provider-settings-picker-summary", "aria-labelledby": id + "-label " + id + "-summary", "aria-disabled": disabled,
         onClick: function (event) { if (disabled) event.preventDefault(); },
-        style: { padding: "12px 10px", minHeight: "44px", cursor: disabled ? "default" : "pointer", overflowWrap: "anywhere" },
-      }, h("span", { id: id + "-summary" }, summary)),
-      h("fieldset", { disabled: disabled, "aria-labelledby": id + "-label", style: { border: 0, margin: 0, padding: "0 10px 10px", display: "flex", flexDirection: "column", gap: "6px" } },
+      }, h("span", { id: id + "-summary", title: summary }, summary)),
+      h("fieldset", { className: "provider-settings-picker-options", disabled: disabled, "aria-labelledby": id + "-label" },
         options.map(function (option) {
           return h("label", { key: option[0], style: { display: "flex", alignItems: "center", gap: "8px", minHeight: "44px", overflowWrap: "anywhere" } },
             h("input", { type: "checkbox", value: option[0], checked: all ? option[0] === "all" : selected.indexOf(option[0]) >= 0,
@@ -1915,8 +1919,9 @@ function statusProvidersField(host, key, value, change, disabled, providers) {
                 change(key, next.join(","));
               },
             }), option[1]);
-        })),
-      h("p", { style: { margin: "0 10px 10px", fontSize: "12px", color: "var(--muted-foreground)" } }, "Choose several providers or All providers. With none selected, the current session is used.")),
+        }),
+        h("p", { style: { margin: "4px 0 0", fontSize: "12px", color: "var(--muted-foreground)" } }, "Choose several providers or All providers. With none selected, the current session is used.")),
+    ),
   );
 }
 
@@ -1926,12 +1931,13 @@ function configurationField(host, key, value, change, disabled, providers) {
   var props = {
     id: id, value: spec.secret && value === SETTINGS_SECRET_MASK ? "" : value, disabled: disabled,
     onChange: function (event) { change(key, event.target.value); },
-    style: { width: "100%", minWidth: 0, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: "6px", background: "var(--background)", color: "inherit", font: "inherit", fontSize: "13px" },
+    className: "provider-settings-control",
   };
   var options = spec.options ? spec.options.slice() : null;
   if (options && !options.some(function (option) { return option[0] === value; })) options.push([value, value.split(",").map(providerLabel).join(", ")]);
   var input = options
-    ? h("select", props, options.map(function (option) { return h("option", { key: option[0], value: option[0] }, option[1]); }))
+    ? h("div", { className: "provider-settings-select" },
+      h("select", props, options.map(function (option) { return h("option", { key: option[0], value: option[0] }, option[1]); })))
     : h("input", Object.assign({}, props, { type: spec.secret ? "password" : spec.type || "text", min: spec.min, max: spec.max, step: "any", autoComplete: "off", placeholder: spec.secret && value === SETTINGS_SECRET_MASK ? "Saved securely" : undefined }));
   return h("div", { key: key, style: { minWidth: 0 } },
     h("label", { htmlFor: id, style: { display: "block", fontWeight: 600, fontSize: "13px", marginBottom: "6px" } }, spec.label),
@@ -2037,7 +2043,82 @@ function settingsProviderDetails(host, provider, usage, failure, connection, pen
   );
 }
 
-var PROVIDER_SETTINGS_CSS =
+var PROVIDER_SETTINGS_CSS = `
+  #provider-usage-settings :is(.provider-settings-control, .provider-settings-picker-options) {
+    box-sizing: border-box;
+    min-width: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--background);
+  }
+  #provider-usage-settings .provider-settings-control {
+    display: block;
+    width: 100%;
+    min-height: 44px;
+    padding: 8px 10px;
+    color: inherit;
+    font: inherit;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  #provider-usage-settings select.provider-settings-control {
+    appearance: none;
+  }
+  #provider-usage-settings :is(select, summary).provider-settings-control {
+    padding-inline-end: 32px;
+  }
+  #provider-usage-settings :is(.provider-settings-select, .provider-settings-picker-summary) {
+    position: relative;
+  }
+  #provider-usage-settings :is(.provider-settings-select, .provider-settings-picker-summary)::after {
+    content: "";
+    box-sizing: border-box;
+    position: absolute;
+    top: 50%;
+    inset-inline-end: 14px;
+    width: 8px;
+    height: 8px;
+    border: solid var(--muted-foreground);
+    border-width: 0 1.5px 1.5px 0;
+    transform: translateY(-75%) rotate(45deg);
+    pointer-events: none;
+  }
+  #provider-usage-settings .provider-settings-picker-summary {
+    display: flex;
+    align-items: center;
+    list-style: none;
+    cursor: pointer;
+  }
+  #provider-usage-settings .provider-settings-picker-summary[aria-disabled="true"] {
+    cursor: default;
+  }
+  #provider-usage-settings .provider-settings-picker-summary > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #provider-usage-settings details[open] > .provider-settings-picker-summary {
+    border-radius: 6px 6px 0 0;
+  }
+  #provider-usage-settings details[open] > .provider-settings-picker-summary::after {
+    transform: translateY(-25%) rotate(225deg);
+  }
+  #provider-usage-settings .provider-settings-picker-options {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding: 0 10px 10px;
+    border-top: 0;
+    border-radius: 0 0 6px 6px;
+    font-size: 13px;
+  }
+  @media (any-pointer: coarse) {
+    #provider-usage-settings .provider-settings-control {
+      font-size: 16px;
+    }
+  }
+` +
   '#provider-usage-settings .provider-settings-summary{display:flex;align-items:center;gap:12px;cursor:pointer;list-style:none;padding:16px 18px;min-height:72px}' +
   '#provider-usage-settings .provider-settings-chevron{flex:none;color:var(--muted-foreground)}' +
   '#provider-usage-settings .provider-settings-icon{display:flex;align-items:center;justify-content:center;flex:none;width:38px;height:38px;border-radius:10px;background:var(--muted)}' +
