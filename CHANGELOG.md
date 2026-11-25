@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0] - 2026-11-25
+
+### Changed
+
+- Add Devin account quotas to Provider Usage (#41) (fe990bf)
+
+
 ## [0.14.0] - 2026-11-24
 
 ### Changed
