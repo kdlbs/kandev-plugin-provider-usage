@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1] - 2026-11-25
+
+### Changed
+
+- Fix provider usage controls and tab overflow (#42) (f84b4a3)
+
+
 ## [0.15.0] - 2026-11-25
 
 ### Changed
