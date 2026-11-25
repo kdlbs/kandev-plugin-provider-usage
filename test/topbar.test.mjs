@@ -131,6 +131,30 @@ async function loadSettings(app, data, config = {}) {
   await flush();
   return app.render();
 }
+
+test("Devin settings show CodexBar authentication guidance and preserve its diagnostic", async () => {
+  const app = mount("plugin-settings");
+  const report = {
+    ...snapshot,
+    providers: [],
+    detected_providers: [{ provider: "devin", via: "configuration" }],
+    unavailable: [{
+      provider: "devin",
+      kind: "not_configured",
+      code: "devin_authorization",
+      message: "Error: selected source requires web support and is only supported on macOS.",
+      setup: { hint: "CodexBar browser import is macOS-only. Configure manual auth in the CodexBar config used by Kandev." },
+    }],
+  };
+  const tree = await loadSettings(app, report);
+  const section = nodes(tree, n => n.props["data-provider-settings"] === "devin")[0];
+  assert.ok(section);
+  assert.match(text(section), /Needs setup/);
+  assert.match(text(section), /Configure Devin authentication in CodexBar/);
+  assert.match(text(section), /manual auth in the CodexBar config/);
+  assert.match(text(section), /only supported on macOS/, "the original CLI diagnostic stays available in Connection details");
+  app.unmount();
+});
 const settingsInput = (tree, key) => nodes(tree, n => n.props.id === "provider-setting-" + key)[0];
 const saveSettings = tree => nodes(tree, n => n.type === "button" && text(n) === "Save settings")[0];
 

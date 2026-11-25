@@ -409,6 +409,17 @@ func (u *cbUsage) windows(provider string) []UtilizationWindow {
 			continue
 		}
 		window := w.toWindow(defaultWindowLabel(i, w.WindowMinutes))
+		// Devin's upstream primary and secondary slots are daily and weekly.
+		// The pinned Windows adapter omits durations, so use the stable slot
+		// identity to retain those labels for its output.
+		if provider == "devin" && w.WindowMinutes == 0 {
+			switch i {
+			case 0:
+				window.Label = "daily"
+			case 1:
+				window.Label = "weekly"
+			}
+		}
 		slot := i
 		window.sourceSlot = &slot
 		switch provider {

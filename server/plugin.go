@@ -75,7 +75,9 @@ const (
 // operator hasn't set `providers`. These are the agent providers that read
 // LOCAL credentials/CLIs, so they resolve quickly and without web cookies —
 // unlike codexbar's ~50 web-only providers, which the `all` sweep wastes time
-// probing. Each is still queried; unconfigured ones surface as unavailable.
+// probing. Devin is added dynamically when its CLI or CodexBar credentials are
+// discovered. Each selected provider is queried; unconfigured ones surface as
+// unavailable.
 var defaultProviders = []string{
 	"claude", "codex", "antigravity", "grok", "copilot", "cursor", "opencodego", "amp",
 }
@@ -657,6 +659,7 @@ func (p *plugin) collectProviders(ctx context.Context) *AllProvidersReport {
 		}
 	}
 	p.addCopilotSetup(ctx, cmd, report)
+	p.addDevinSetup(report)
 	// The two independent APIs share the report deadline, not each other's
 	// latency. Keep their mutable reports separate until both have completed.
 	var augment AllProvidersReport
@@ -857,7 +860,18 @@ func (p *plugin) providerList(ctx context.Context) []string {
 		return nil
 	}
 	if len(configured) == 0 {
-		configured = defaultProviders
+		configured = append([]string(nil), defaultProviders...)
+		// Devin is opt-in to automatic polling because its connection can be
+		// available through CodexBar's browser import or manual settings rather
+		// than one of the curated local agent CLIs.
+		if p.scanProviders != nil {
+			for _, provider := range p.scanProviders(p.config(ctx)) {
+				if provider.Provider == "devin" {
+					configured = append(configured, "devin")
+					break
+				}
+			}
+		}
 	}
 	// Augment is fetched via its own Analytics API (appendAugment), not codexbar.
 	cfg := p.config(ctx)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -60,12 +61,12 @@ func testScanner(commands, files map[string]bool, env map[string]string) provide
 }
 
 func TestProviderDiscoveryRequiresLocalEvidence(t *testing.T) {
-	scanner := testScanner(map[string]bool{"claude": true, "copilot": true}, map[string]bool{
+	scanner := testScanner(map[string]bool{"claude": true, "copilot": true, "devin": true}, map[string]bool{
 		"/Applications/Cursor.app":                            true,
 		"/fixture/home/.gemini/antigravity-cli/settings.json": true,
 	}, nil)
 	require.Equal(t, []detectedProvider{
-		{"antigravity", "configuration"}, {"claude", "cli"}, {"copilot", "cli"}, {"cursor", "app"},
+		{"antigravity", "configuration"}, {"claude", "cli"}, {"copilot", "cli"}, {"cursor", "app"}, {"devin", "cli"},
 	}, scanner.scan(nil))
 	require.Empty(t, testScanner(nil, nil, nil).scan(nil), "absent providers must not have settings sections")
 	require.Equal(t, []detectedProvider{{"cursor", "configuration"}}, testScanner(nil, map[string]bool{
@@ -74,6 +75,123 @@ func TestProviderDiscoveryRequiresLocalEvidence(t *testing.T) {
 	require.Equal(t, []detectedProvider{{"augment", "configuration"}, {"cursor", "configuration"}}, testScanner(nil, nil, nil).scan(map[string]any{
 		configKeyAugmentToken: "secret", cursorCookieSetting: "secret",
 	}))
+}
+
+func TestDevinDiscoveryReadsCodexbarConfigWithoutReturningCredentials(t *testing.T) {
+	for _, source := range []string{"CODEXBAR_CONFIG", "XDG config", "legacy config"} {
+		t.Run(source, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
+			t.Setenv("CODEXBAR_CONFIG", "")
+			t.Setenv("XDG_CONFIG_HOME", "")
+			var path string
+			switch source {
+			case "CODEXBAR_CONFIG":
+				path = filepath.Join(t.TempDir(), "custom-codexbar.json")
+				t.Setenv("CODEXBAR_CONFIG", path)
+			case "XDG config":
+				base := filepath.Join(t.TempDir(), "xdg")
+				t.Setenv("XDG_CONFIG_HOME", base)
+				path = filepath.Join(base, "codexbar", "config.json")
+			default:
+				path = filepath.Join(home, ".codexbar", "config.json")
+			}
+			require.NoError(t, os.MkdirAll(filepath.Dir(path), 0700))
+			const secretConfig = `{"providers":[{"id":"devin","cookieSource":"manual","cookieHeader":"Bearer private-token","workspaceID":"org_private"}]}`
+			require.NoError(t, os.WriteFile(path, []byte(secretConfig), 0600))
+
+			providers := configuredCodexbarProviders()
+			require.Equal(t, []detectedProvider{{"devin", "configuration"}}, providers)
+			p := newTestPlugin(t, nil, nil, nil)
+			p.scanProviders = func(map[string]any) []detectedProvider { return configuredCodexbarProviders() }
+			response := p.discoveryWebhook(context.Background(), http.MethodGet)
+			require.EqualValues(t, http.StatusOK, response.Status)
+			require.Contains(t, string(response.Body), `"provider":"devin"`)
+			require.Contains(t, string(response.Body), `"via":"configuration"`)
+			require.NotContains(t, string(response.Body), "private-token")
+			require.NotContains(t, string(response.Body), "org_private")
+		})
+	}
+}
+
+func TestDevinDiscoveryRecognizesExplicitEnvironmentAndBrowserSetups(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		goos   string
+		config string
+		env    map[string]string
+		want   bool
+	}{
+		{
+			name:   "manual auth takes token from environment",
+			goos:   "linux",
+			config: `{"providers":[{"id":"devin","cookieSource":"manual","cookieHeader":null,"workspaceID":"org_fixture"}]}`,
+			env:    map[string]string{"DEVIN_AUTHORIZATION": "Bearer environment-secret"},
+			want:   true,
+		},
+		{
+			name:   "manual auth without token is not a connection",
+			goos:   "linux",
+			config: `{"providers":[{"id":"devin","cookieSource":"manual","cookieHeader":null}]}`,
+		},
+		{
+			name:   "Linux auto source does not use an environment token",
+			goos:   "linux",
+			config: `{"providers":[{"id":"devin","enabled":true,"cookieSource":"auto"}]}`,
+			env:    map[string]string{"DEVIN_BEARER_TOKEN": "environment-secret"},
+		},
+		{
+			name:   "enabled macOS browser connection",
+			goos:   "darwin",
+			config: `{"providers":[{"id":"devin","enabled":true,"cookieSource":"auto"}]}`,
+			want:   true,
+		},
+		{
+			name:   "disabled macOS browser connection",
+			goos:   "darwin",
+			config: `{"providers":[{"id":"devin","enabled":false,"cookieSource":"auto"}]}`,
+		},
+		{
+			name: "pinned Windows environment works without CodexBar config",
+			goos: "windows",
+			env:  map[string]string{"DEVIN_API_KEY": "environment-secret", "DEVIN_ORG": "org_fixture"},
+			want: true,
+		},
+		{
+			name: "Windows token without organization is incomplete",
+			goos: "windows",
+			env:  map[string]string{"DEVIN_BEARER_TOKEN": "environment-secret"},
+		},
+		{
+			name: "upstream environment token without manual config is incomplete",
+			goos: "linux",
+			env:  map[string]string{"DEVIN_BEARER_TOKEN": "environment-secret"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			configPath := filepath.Join(home, "codexbar.json")
+			env := map[string]string{"CODEXBAR_CONFIG": configPath}
+			for key, value := range tc.env {
+				env[key] = value
+			}
+			getenv := func(key string) string { return env[key] }
+			if tc.config != "" {
+				require.NoError(t, os.WriteFile(configPath, []byte(tc.config), 0600))
+			}
+			providers := configuredCodexbarProvidersFor(home, getenv, tc.goos)
+			if tc.want {
+				require.Equal(t, []detectedProvider{{"devin", "configuration"}}, providers)
+			} else {
+				require.Empty(t, providers)
+			}
+			encoded, err := json.Marshal(providers)
+			require.NoError(t, err)
+			require.NotContains(t, string(encoded), "environment-secret")
+			require.NotContains(t, string(encoded), "org_fixture")
+		})
+	}
 }
 
 func TestAntigravityDiscoveryAndLegacyGeminiCredentials(t *testing.T) {
