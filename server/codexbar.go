@@ -207,7 +207,10 @@ const sourceOAuth = "oauth"
 func runUsageFast(ctx context.Context, cmd resolvedCommand, run runner, provider string) ([]cbEntry, error) {
 	// Antigravity's auto source reads the signed-in agy CLI before its OAuth
 	// fallback. Forcing OAuth first can miss an otherwise usable CLI session.
-	if provider == "" || provider == providersAll || provider == "antigravity" {
+	// Devin also needs automatic source selection: CodexBar uses browser auth on
+	// macOS and manual configuration on Linux, while the Windows port uses its
+	// own bearer-token path.
+	if provider == "" || provider == providersAll || provider == "antigravity" || provider == "devin" {
 		return runUsage(ctx, cmd, run, provider)
 	}
 	if fast, err := runUsageSource(ctx, cmd, run, provider, sourceOAuth); err == nil && hasUsage(fast) {
@@ -267,6 +270,9 @@ type providerMatch struct {
 }
 
 var providerMatches = []providerMatch{
+	// Devin's agent display name identifies the quota account even when its
+	// session runs a Claude, GPT, or Fusion model.
+	{"devin", []string{"devin"}},
 	{"antigravity", []string{"antigravity", "agy"}},
 	{"claude", []string{"claude", "anthropic", "sonnet", "opus", "haiku", "fable"}},
 	{"codex", []string{"codex", "openai", "gpt", "o1", "o3", "o4"}},

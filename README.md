@@ -5,8 +5,8 @@ utilization** for your agent providers — how much of each rate-limit window
 (5-hour / weekly / monthly …) is used, with reset times — in the shared page-wide
 and session top bars and, when enabled, Kandev's global status bar. Data comes from the
 [codexbar](https://github.com/steipete/codexbar) CLI (covers ~60 providers:
-Claude, Codex/OpenAI, Antigravity, Copilot, Cursor, Grok, OpenCode, …) plus
-Augment's own Analytics API.
+Claude, Codex/OpenAI, Antigravity, Copilot, Cursor, Devin, Grok, OpenCode, …)
+plus Augment's own Analytics API.
 
 ## Screenshots
 
@@ -141,6 +141,10 @@ the UI Refresh action when a fresh provider read is needed.
   Antigravity provider, with automatic selection of the signed-in CLI source.
   Antigravity sessions use Antigravity quotas, including sessions that run Claude models.
   Explicit Gemini provider settings remain available for enterprise and API-key accounts.
+- **Devin** shows its daily and weekly account quotas. Devin sessions use Devin's
+  quota even when the session runs a Claude, GPT, or Fusion model. The default
+  provider list includes Devin when its CLI, CodexBar setup, or supported
+  environment credentials are detected.
 - **Copilot AI credits** show exact consumption, such as `3,313 / 25,000 AI credits`,
   in the provider panel, Settings, and the phone Status drawer.
   The plugin reads numeric credit counters from CodexBar without estimates from rounded percentages.
@@ -163,8 +167,9 @@ the UI Refresh action when a fresh provider read is needed.
   legacy Gemini sessions, use a separate session cache. A new background snapshot
   invalidates that cache, including after a failed poll. Empty results stay empty;
   they do not become provider failures in Settings or the agent tool.
-  Each refresh tries codexbar's fast `oauth`
-  source first, falling back to the agent CLI only when needed.
+  Each refresh tries CodexBar's fast `oauth` source first, then uses its
+  automatic source when OAuth has no usage. Antigravity and Devin use automatic
+  source selection directly; the `all` sweep remains a single automatic-source call.
 - **Local sign-in**: OAuth providers reuse credentials on the machine running
   Kandev (`~/.claude`, `~/.codex`, …). Cursor can use its Desktop session,
   Cursor Agent CLI login, or a configured dashboard cookie; Augment uses an
@@ -239,6 +244,23 @@ email, budget and plan unit live inside **Augment**, when detected or configured
 Copilot requires separate CodexBar authorization, described below. Paused connections
 retain their section so they can be enabled again.
 
+Devin's quota connection is managed in CodexBar. On macOS, sign in to Devin in a
+supported Chromium browser and open the organization's **Usage & Limits** page;
+CodexBar imports the browser session. CodexBar's browser import is macOS-only.
+On Linux, configure manual Devin authentication in the CodexBar configuration
+used by Kandev. Set `cookieSource` to `manual` even when the token comes from
+`DEVIN_BEARER_TOKEN` or `DEVIN_AUTHORIZATION`. You can omit `cookieHeader` when
+you use one of those environment variables. Set the organization in
+`workspaceID`, `DEVIN_ORGANIZATION`, or `DEVIN_ORG`. The plugin resolves that
+CodexBar configuration through `CODEXBAR_CONFIG`, XDG, or the legacy location.
+
+On Windows, the pinned [Win-CodexBar v0.56.8 Devin adapter](https://github.com/nesszer/Win-CodexBar/blob/v0.56.8/rust/src/providers/devin/mod.rs)
+accepts a bearer token from `DEVIN_BEARER_TOKEN` or `DEVIN_API_KEY` and
+requires `DEVIN_ORG` for the organization ID. The pinned [`usage` command](https://github.com/nesszer/Win-CodexBar/blob/v0.56.8/rust/src/cli/usage.rs)
+does not pass the `workspace_id` provider extra to the adapter. Configure these
+for the same Windows user and environment that runs Kandev. Setup details for
+upstream CodexBar are in its [Devin provider guide](https://github.com/steipete/CodexBar/blob/v0.83.0/docs/devin.md).
+
 **Shared settings** holds the refresh interval and status-bar presentation.
 Expand **Status bar providers** to select several named providers, the current
 session, or all providers. With none selected, the current session is used.
@@ -261,7 +283,7 @@ Configuration keys (retained for compatibility with existing installations):
 | `cursor_desktop_keychain`   | `off` (default) or `on`. On macOS, permit noninteractive access to `Cursor Safe Storage` / `Cursor` for encrypted Desktop sessions. This setting is independent of Agent CLI Keychain. |
 | `codexbar_command`          | Explicit codexbar command. Empty = auto-detect / auto-download.                                             |
 | `codexbar_poll_minutes`     | Background refresh interval (default 5, minimum 1).                                                          |
-| `codexbar_providers`        | Comma-separated provider ids to poll. Empty = curated local-credential set; `"all"` = full sweep (slower).  |
+| `codexbar_providers`        | Comma-separated provider ids to poll. Empty = curated local-credential set, plus Devin when its CLI, CodexBar setup, or supported environment credentials are detected; `"all"` = full sweep (slower).  |
 | `disabled_providers`        | Paused provider IDs, managed by each section's Show usage switch. Their usage stays out of every panel. |
 | `display_pill_providers`    | Providers included in the optional global status display, comma-separated. Tokens: `current`, `all`, or explicit ids. Empty = current session's provider only. The top-bar pills instead follow the locally remembered tab selection. |
 | `display_status_bar_mode`   | `off` (default) keeps usage in the top bars only. `percentage` adds icon + percentage to global status; `meter` adds icon + meter without percentage; `both` adds meter + percentage. Enabled modes also appear in the phone Status drawer. Requires a Kandev host with app-status-bar slots. |

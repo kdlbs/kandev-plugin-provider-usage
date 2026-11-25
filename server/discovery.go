@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -96,6 +97,7 @@ func (s providerScanner) scan(cfg map[string]any) []detectedProvider {
 			filepath.Join(appData, "Antigravity", "User", "globalStorage", "state.vscdb"),
 		}},
 		{"copilot", []string{"copilot"}, []string{filepath.Join(configHome, "github-copilot", "apps.json"), filepath.Join(configHome, "github-copilot", "hosts.json"), filepath.Join(s.home, ".copilot", "config.json")}},
+		{"devin", []string{"devin"}, nil},
 		{"cursor", []string{"cursor", "cursor-agent", "cursor-agent-acp"}, []string{
 			"/Applications/Cursor.app", filepath.Join(s.home, "Applications", "Cursor.app"),
 			filepath.Join(s.home, "Library", "Application Support", "Cursor", "User", "globalStorage", "state.vscdb"),
@@ -144,34 +146,67 @@ func (s providerScanner) scan(cfg map[string]any) []detectedProvider {
 // Explicit CodexBar credentials also count as a connection on this host,
 // including providers outside our local-CLI catalog. Only IDs leave this read.
 func configuredCodexbarProviders() []detectedProvider {
-	taskHome, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-	file, err := os.Open(cursorCodexbarConfigPath(taskHome, os.Getenv))
-	if err != nil {
-		return nil
-	}
-	defer file.Close()
-	var config struct {
-		Providers []struct {
-			ID           string `json:"id"`
-			CookieHeader string `json:"cookieHeader"`
-			APIKey       string `json:"apiKey"`
-			Token        string `json:"token"`
-		} `json:"providers"`
-	}
-	if json.NewDecoder(io.LimitReader(file, 2<<20)).Decode(&config) != nil {
-		return nil
-	}
+	taskHome, _ := os.UserHomeDir()
+	return configuredCodexbarProvidersFor(taskHome, os.Getenv, runtime.GOOS)
+}
+
+// configuredCodexbarProvidersFor returns provider IDs only. Devin has several
+// explicit connection shapes that do not serialize a token: manual auth may
+// take it from the environment, macOS auto auth uses browser localStorage, and
+// the Windows port reads its token and organization from the environment.
+func configuredCodexbarProvidersFor(taskHome string, getenv func(string) string, goos string) []detectedProvider {
 	found := map[string]string{}
-	for _, provider := range config.Providers {
-		id := strings.ToLower(strings.TrimSpace(provider.ID))
-		if id != "" && (strings.TrimSpace(provider.CookieHeader) != "" || strings.TrimSpace(provider.APIKey) != "" || strings.TrimSpace(provider.Token) != "") {
-			found[id] = "configuration"
+	if taskHome != "" {
+		file, err := os.Open(cursorCodexbarConfigPath(taskHome, getenv))
+		if err == nil {
+			defer file.Close()
+			var config struct {
+				Providers []struct {
+					ID           string `json:"id"`
+					Enabled      bool   `json:"enabled"`
+					CookieSource string `json:"cookieSource"`
+					CookieHeader string `json:"cookieHeader"`
+					APIKey       string `json:"apiKey"`
+					Token        string `json:"token"`
+				} `json:"providers"`
+			}
+			if json.NewDecoder(io.LimitReader(file, 2<<20)).Decode(&config) == nil {
+				for _, provider := range config.Providers {
+					id := strings.ToLower(strings.TrimSpace(provider.ID))
+					if id == "" {
+						continue
+					}
+					if strings.TrimSpace(provider.CookieHeader) != "" || strings.TrimSpace(provider.APIKey) != "" || strings.TrimSpace(provider.Token) != "" {
+						found[id] = "configuration"
+					}
+					if id != "devin" {
+						continue
+					}
+					source := strings.ToLower(strings.TrimSpace(provider.CookieSource))
+					manualEnvironmentToken := source == "manual" && hasEnvironmentValue(getenv, "DEVIN_BEARER_TOKEN", "DEVIN_AUTHORIZATION")
+					macOSBrowserConnection := goos == "darwin" && provider.Enabled && (source == "" || source == "auto")
+					if manualEnvironmentToken || macOSBrowserConnection {
+						found[id] = "configuration"
+					}
+				}
+			}
 		}
 	}
+	if goos == "windows" &&
+		hasEnvironmentValue(getenv, "DEVIN_BEARER_TOKEN", "DEVIN_API_KEY") &&
+		trimmedString(getenv("DEVIN_ORG")) != "" {
+		found["devin"] = "configuration"
+	}
 	return sortedDetectedProviders(found)
+}
+
+func hasEnvironmentValue(getenv func(string) string, keys ...string) bool {
+	for _, key := range keys {
+		if strings.TrimSpace(getenv(key)) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func sortedDetectedProviders(found map[string]string) []detectedProvider {

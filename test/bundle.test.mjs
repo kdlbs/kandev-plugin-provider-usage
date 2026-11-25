@@ -220,6 +220,26 @@ test("Cursor panel fills Total, Auto and API bars with usage and shows extra spe
   assert.equal(everyElement(panel, (node) => node.type === "details").length, 0);
 });
 
+test("Devin panel displays the returned quota windows and optional resets", () => {
+  const { providerPanel } = statusMeterHelpers(cursorDetailNow);
+  const withResets = providerPanel({ jsx: element }, {
+    provider: "devin",
+    windows: [
+      { label: "daily", utilization_pct: 24, reset_at: "2026-09-11T00:00:00Z" },
+      { label: "weekly", utilization_pct: 63, reset_at: "2026-09-14T00:00:00Z" },
+    ],
+  }, 75, 90, "", () => {}, false);
+  assert.match(renderedText(withResets), /daily.*24% used.*resets in/);
+  assert.match(renderedText(withResets), /weekly.*63% used.*resets in/);
+
+  const withoutResets = providerPanel({ jsx: element }, {
+    provider: "devin",
+    windows: [{ label: "weekly", utilization_pct: 63 }],
+  }, 75, 90, "", () => {}, false);
+  assert.match(renderedText(withoutResets), /weekly.*63% used/);
+  assert.doesNotMatch(renderedText(withoutResets), /resets/);
+});
+
 test("Cursor's single-window Enterprise response shows unknown metrics without inventing zeros", () => {
   const { providerPanel } = statusMeterHelpers(cursorDetailNow);
   const usage = { provider: "cursor", plan: "Cursor Enterprise", windows: [{ label: "Total Usage", utilization_pct: 2.6216666666666666 }] };

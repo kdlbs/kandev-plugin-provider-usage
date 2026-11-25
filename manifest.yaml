@@ -3,7 +3,7 @@ api_version: 1
 min_kandev_version: "0.99.0"
 version: "0.14.0"
 display_name: "Provider Usage"
-description: "Subscription utilization for your agent providers — how much of each rate-limit window (5-hour / weekly / monthly) is used, with reset times and Codex manual reset credits. View usage in the shared top bar (including Threads), session top bar, or phone listing menu; the selected provider is remembered locally. Data comes from the codexbar CLI (plus Augment's Analytics API)."
+description: "Subscription utilization for your agent providers — how much of each rate-limit window (5-hour / daily / weekly / monthly) is used, with reset times and Codex manual reset credits. View usage in the shared top bar (including Threads), session top bar, or phone listing menu; the selected provider is remembered locally. Data comes from the codexbar CLI (plus Augment's Analytics API)."
 author: "kandev"
 categories: ["analytics"]
 repo_url: "https://github.com/kdlbs/kandev-plugin-provider-usage"
@@ -20,7 +20,8 @@ runtime:
 # Read-only access to kandev sessions so the backend can map the composer's
 # kandev session id to the agent it runs, and from there to a codexbar provider
 # (claude / codex / antigravity / ...). The UI only ever sends kandev ids; the
-# session -> provider resolution happens server-side.
+# session -> provider resolution happens server-side, including Devin sessions
+# whose account supplies quotas across Claude, GPT, and Fusion models.
 capabilities:
   api_read: ["sessions"]
   state: true # Remember the selected Cursor team across restarts and upgrades.

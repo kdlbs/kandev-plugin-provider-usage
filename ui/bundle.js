@@ -131,6 +131,7 @@ var PROVIDER_LABELS = {
   antigravity: "Antigravity",
   copilot: "GitHub Copilot",
   cursor: "Cursor",
+  devin: "Devin",
   grok: "Grok",
   opencodego: "OpenCode",
   amp: "Amp",
@@ -153,6 +154,7 @@ var PROVIDER_ICON = {
   grok: { mono: "Gk", bg: "#1f2937" },
   copilot: { mono: "Co", bg: "#6e5494" },
   cursor: { mono: "Cu", bg: "#111827" },
+  devin: { mono: "Dv", bg: "#3765e6" },
   augment: { mono: "Au", bg: "#6152d9" },
   amp: { mono: "Am", bg: "#8b5cf6" },
 };
@@ -1970,6 +1972,9 @@ function settingsConnection(provider, usage, failure, enabled, pending, config) 
   }
   if (pending) return { label: "Checking usage", tone: "neutral", summary: settingsFoundVia(provider.via), hint: "Reading usage in the background. You can configure this provider while it loads." };
   if (failure) {
+    if (id === "devin" && failure.code === "devin_authorization") {
+      return { label: "Needs setup", tone: "warning", summary: "Configure Devin authentication in CodexBar", hint: failure.setup && failure.setup.hint || "Set up Devin authentication in the CodexBar installation used by Kandev, then refresh usage." };
+    }
     if (id === "copilot" && failure.code === "copilot_authorization") {
       return { label: "Needs setup", tone: "warning", summary: "Authorize Copilot in CodexBar", hint: failure.setup && failure.setup.hint || "Copilot CLI sign-in and CodexBar authorization are separate. Update CodexBar, then refresh usage for setup instructions." };
     }
